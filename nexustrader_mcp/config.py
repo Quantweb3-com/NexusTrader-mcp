@@ -8,32 +8,56 @@ from typing import Any, Dict, List, Optional
 import yaml
 from pydantic import BaseModel, field_validator
 
-from nexustrader.config import (
-    BasicConfig,
-    Config,
-    LogConfig,
-    PrivateConnectorConfig,
-    PublicConnectorConfig,
-)
-from nexustrader.constants import ExchangeType
-
-from nexustrader.exchange import (
-    BinanceAccountType,
-    BybitAccountType,
-    OkxAccountType,
-    HyperLiquidAccountType,
-    BitgetAccountType,
-)
-
-ACCOUNT_TYPE_MAP: Dict[str, Dict[str, Any]] = {
-    "binance": {e.value: e for e in BinanceAccountType},
-    "bybit": {e.value: e for e in BybitAccountType},
-    "okx": {e.value: e for e in OkxAccountType},
-    "hyperliquid": {e.value: e for e in HyperLiquidAccountType},
-    "bitget": {e.value: e for e in BitgetAccountType},
-}
+# nexustrader heavy imports are deferred to functions below to avoid loading
+# the entire ccxt library (~100+ exchanges) at module import time.
 
 TESTNET_KEYWORDS = {"TESTNET", "DEMO", "demo"}
+
+
+# ---------------------------------------------------------------------------
+# Lazy account-type map (deferred import of nexustrader.exchange / ccxt)
+# ---------------------------------------------------------------------------
+
+_ACCOUNT_TYPE_MAP_CACHE: Optional[Dict[str, Dict[str, Any]]] = None
+
+
+def get_account_type_map() -> Dict[str, Dict[str, Any]]:
+    global _ACCOUNT_TYPE_MAP_CACHE
+    if _ACCOUNT_TYPE_MAP_CACHE is None:
+        from nexustrader.exchange import (
+            BinanceAccountType,
+            BitgetAccountType,
+            BybitAccountType,
+            HyperLiquidAccountType,
+            OkxAccountType,
+        )
+        _ACCOUNT_TYPE_MAP_CACHE = {
+            "binance": {e.value: e for e in BinanceAccountType},
+            "bybit": {e.value: e for e in BybitAccountType},
+            "okx": {e.value: e for e in OkxAccountType},
+            "hyperliquid": {e.value: e for e in HyperLiquidAccountType},
+            "bitget": {e.value: e for e in BitgetAccountType},
+        }
+    return _ACCOUNT_TYPE_MAP_CACHE
+
+
+# Keep ACCOUNT_TYPE_MAP as a module-level name for backward compatibility.
+# Accessing it triggers lazy initialization.
+class _LazyAccountTypeMap:
+    def get(self, key):
+        return get_account_type_map().get(key)
+
+    def __getitem__(self, key):
+        return get_account_type_map()[key]
+
+    def __contains__(self, key):
+        return key in get_account_type_map()
+
+    def items(self):
+        return get_account_type_map().items()
+
+
+ACCOUNT_TYPE_MAP = _LazyAccountTypeMap()
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +101,7 @@ def _infer_settings_key(exchange_name: str, account_type_str: str) -> str:
 
 def _resolve_account_type(exchange_name: str, account_type_str: str):
     exchange_key = exchange_name.lower()
-    mapping = ACCOUNT_TYPE_MAP.get(exchange_key)
+    mapping = get_account_type_map().get(exchange_key)
     if mapping is None:
         raise ValueError(f"不支持的交易所: {exchange_name}")
 
@@ -91,7 +115,9 @@ def _resolve_account_type(exchange_name: str, account_type_str: str):
     return at
 
 
-def _build_basic_config(exchange_name: str, exc_cfg: ExchangeConfig) -> BasicConfig:
+def _build_basic_config(exchange_name: str, exc_cfg: ExchangeConfig):
+    from nexustrader.config import BasicConfig
+
     is_test = _is_testnet(exc_cfg.account_type)
 
     if exc_cfg.api_key and exc_cfg.secret:
@@ -156,11 +182,14 @@ class SubscriptionInfo:
 def build_nexus_config(
     mcp_cfg: MCPConfig,
     strategy,
-) -> tuple[Config, SubscriptionInfo]:
+) -> tuple:
     """将 MCPConfig 转换为 NexusTrader 原生 Config + 订阅信息。"""
-    basic_configs: Dict[ExchangeType, BasicConfig] = {}
-    public_conn_configs: Dict[ExchangeType, List[PublicConnectorConfig]] = {}
-    private_conn_configs: Dict[ExchangeType, List[PrivateConnectorConfig]] = {}
+    from nexustrader.config import Config, LogConfig, PrivateConnectorConfig, PublicConnectorConfig
+    from nexustrader.constants import ExchangeType
+
+    basic_configs = {}
+    public_conn_configs = {}
+    private_conn_configs = {}
     subscriptions = SubscriptionInfo()
 
     for exchange_name, exc_cfg in mcp_cfg.exchanges.items():
@@ -178,8 +207,13 @@ def build_nexus_config(
         ]
 
         if exc_cfg.symbols and exc_cfg.subscribe:
+            exchange_suffix = exchange_name.upper()
+            full_symbols = [
+                s if "." in s else f"{s}.{exchange_suffix}"
+                for s in exc_cfg.symbols
+            ]
             for sub_type in exc_cfg.subscribe:
-                subscriptions.add(sub_type, exc_cfg.symbols)
+                subscriptions.add(sub_type, full_symbols)
 
     config = Config(
         strategy_id=mcp_cfg.strategy_id,

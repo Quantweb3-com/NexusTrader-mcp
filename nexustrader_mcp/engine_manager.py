@@ -2,66 +2,49 @@
 
 from __future__ import annotations
 
-import sys
 import threading
-import time
-from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
-from nexustrader.engine import Engine
-
-from nexustrader_mcp.config import (
-    SubscriptionInfo,
-    build_nexus_config,
-    find_config_path,
-    load_mcp_config,
-)
-from nexustrader_mcp.mcp_strategy import MCPStrategy
+if TYPE_CHECKING:
+    from nexustrader.engine import Engine
+    from nexustrader_mcp.mcp_strategy import MCPStrategy
+    from nexustrader_mcp.config import SubscriptionInfo
 
 
 class EngineManager:
     """Start / stop NexusTrader Engine in a daemon thread."""
 
     def __init__(self):
-        self.strategy: MCPStrategy = MCPStrategy()
+        self._strategy: Optional[MCPStrategy] = None
         self.engine: Optional[Engine] = None
         self._thread: Optional[threading.Thread] = None
         self._ready = threading.Event()
-        self._error: Optional[Exception] = None
+        self._error: Optional[BaseException] = None
         self._subscriptions: Optional[SubscriptionInfo] = None
 
     # ------------------------------------------------------------------
     # Public
     # ------------------------------------------------------------------
 
-    def start(self, config_path: Optional[str] = None, timeout: float = 60):
-        """Load config, build engine, start in background thread, block until ready."""
-        path = find_config_path(config_path)
-        mcp_cfg = load_mcp_config(path)
+    @property
+    def strategy(self) -> MCPStrategy:
+        """Return strategy, blocking until engine is ready if startup is in progress."""
+        if self._thread is not None:
+            if not self._ready.wait(timeout=60):
+                raise RuntimeError("NexusTrader 引擎启动超时（60s），请检查网络和配置")
+            if self._error:
+                raise RuntimeError(f"NexusTrader 引擎启动失败: {self._error}")
+        return self._strategy
 
-        nexus_config, self._subscriptions = build_nexus_config(
-            mcp_cfg, self.strategy
-        )
-
-        self.strategy._subscriptions = self._subscriptions.items
-
-        self.engine = Engine(nexus_config)
-
+    def start(self, config_path: Optional[str] = None):
+        """Launch background thread for all startup work. Returns immediately."""
         self._thread = threading.Thread(
-            target=self._run_engine, daemon=True, name="nexustrader-engine"
+            target=self._run_all,
+            args=(config_path,),
+            daemon=True,
+            name="nexustrader-engine",
         )
         self._thread.start()
-
-        if not self._ready.wait(timeout=timeout):
-            print(
-                "NexusTrader 引擎启动超时，请检查交易所连接和凭证配置。",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-
-        if self._error:
-            print(f"NexusTrader 引擎启动失败: {self._error}", file=sys.stderr)
-            sys.exit(1)
 
     def stop(self):
         if self.engine:
@@ -74,8 +57,36 @@ class EngineManager:
     # Internal
     # ------------------------------------------------------------------
 
+    def _run_all(self, config_path: Optional[str]):
+        """Full startup in background: imports + config + engine. Sets _ready when done."""
+        try:
+            # All heavy imports happen here, off the main thread
+            from nexustrader_mcp.mcp_strategy import MCPStrategy
+            from nexustrader.engine import Engine
+            from nexustrader_mcp.config import (
+                build_nexus_config,
+                find_config_path,
+                load_mcp_config,
+            )
+
+            self._strategy = MCPStrategy()
+            path = find_config_path(config_path)
+            mcp_cfg = load_mcp_config(path)
+
+            nexus_config, self._subscriptions = build_nexus_config(
+                mcp_cfg, self._strategy
+            )
+            self._strategy._subscriptions = self._subscriptions.items
+
+            self.engine = Engine(nexus_config)
+            self._run_engine()
+
+        except BaseException as exc:
+            self._error = exc
+            self._ready.set()
+
     def _run_engine(self):
-        """Runs in the background thread."""
+        """Run NexusTrader event loop until stopped."""
         try:
             self.engine._build()
             self.engine._loop.run_until_complete(self.engine._cache.start())
@@ -91,6 +102,6 @@ class EngineManager:
                 await self.engine._task_manager.wait()
 
             self.engine._loop.run_until_complete(_start_and_signal())
-        except Exception as exc:
+        except BaseException as exc:
             self._error = exc
             self._ready.set()
