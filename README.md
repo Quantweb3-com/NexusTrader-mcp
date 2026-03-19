@@ -177,7 +177,7 @@ uv run nexustrader-mcp setup
 
 ### 手动配置
 
-编辑 `~/.claude/settings.json`：
+编辑 `~/.claude.json`（注意：是用户主目录下的 `.claude.json`，不是 `~/.claude/settings.json`）：
 
 ```json
 {
@@ -347,11 +347,114 @@ AI 会调用 `create_order`，然后回复：
 
 通常是交易所连接问题，检查网络和 API 凭证。测试网用户确认 `account_type` 包含 `TESTNET` 或 `DEMO`。
 
+**Q: Claude Code 中 MCP 服务器启动报错 / uv 环境冲突？**
+
+请确保你 **没有在 Anaconda Prompt 中启动 Claude Code**。详见下方「Anaconda 用户注意事项」。
+
 **Q: Cursor / Claude Code 里看不到 NexusTrader 工具？**
 
 1. 确认配置文件已写入（`~/.cursor/mcp.json` 或 `~/.claude/settings.json`）
 2. 重启 IDE
 3. 确认 `uv` 在 PATH 中可用
+
+---
+
+## Anaconda 用户注意事项
+
+如果你的系统安装了 Anaconda / Miniconda，运行 `uv run` 时可能遇到以下问题：
+
+### ⚠️ 不要在 Anaconda Prompt 中运行 Claude Code
+
+**这是最常见的问题。** 在 Anaconda Prompt（或任何已激活 Conda 环境的终端）中启动 Claude Code 会导致 Conda 的环境变量（`PYTHONPATH`、`PYTHONHOME`、`CONDA_PREFIX` 等）被继承到 Claude Code 的子进程中，使得 `uv` 创建的虚拟环境与 Conda 环境发生冲突，MCP 服务器无法正常启动。
+
+**正确做法：**
+- 使用 **普通的 PowerShell**、**CMD**、**Windows Terminal** 或 **VS Code / Cursor 内置终端** 来启动 Claude Code
+- 确保启动终端时 **没有** 自动激活 Conda 环境（检查 prompt 前面是否有 `(base)` 等标识）
+
+**如果你的终端默认会激活 Conda**（prompt 前有 `(base)`），可以先关闭自动激活：
+
+```bash
+conda config --set auto_activate_base false
+```
+
+然后重新打开终端再启动 Claude Code。
+
+---
+
+### 问题一：`AttributeError: module '_thread' has no attribute 'daemon_threads_allowed'`
+
+**现象：**
+
+```
+Could not import runpy module
+...
+File "H:\ProgramData\Anaconda3\Lib\threading.py", line 36, in <module>
+    _daemon_threads_allowed = _thread.daemon_threads_allowed
+AttributeError: module '_thread' has no attribute 'daemon_threads_allowed'
+```
+
+**原因：** Anaconda 将自己的 `Lib` 目录写入了系统 `PYTHONPATH` 环境变量，导致 uv 创建的虚拟环境在启动时加载了 Anaconda 的标准库（与 venv 的 Python 版本不匹配）。
+
+**解决方法：**
+
+方法 A — 运行时临时清除（快速验证）：
+
+```bash
+# Linux / macOS
+PYTHONPATH="" uv run nexustrader-mcp setup
+
+# Windows (PowerShell)
+$env:PYTHONPATH=""; uv run nexustrader-mcp setup
+
+# Windows (CMD)
+set PYTHONPATH= && uv run nexustrader-mcp setup
+```
+
+方法 B — 永久修复（推荐）：
+
+在系统/用户环境变量中删除 Anaconda 对 `PYTHONPATH` 的设置。Anaconda 本身不需要 `PYTHONPATH`，这通常是安装时的残留配置。
+
+> Windows 路径：控制面板 → 系统 → 高级系统设置 → 环境变量，找到 `PYTHONPATH` 删除或清空。
+
+---
+
+### 问题二：`uv sync` 使用了 Anaconda 的 Python 而非独立 CPython
+
+**现象：** `uv sync` 成功，但运行时仍报错，且 `.venv/Scripts/python.exe` 指向 Anaconda。
+
+**原因：** 未指定 Python 版本时，uv 可能优先发现系统 PATH 中的 Anaconda Python。
+
+**解决方法：** 在项目根目录固定 Python 版本，强制 uv 使用独立管理的 CPython：
+
+```bash
+echo "3.11" > .python-version
+rm -rf .venv
+uv sync
+```
+
+本项目已包含 `.python-version` 文件，`uv sync` 会自动使用 CPython 3.11（uv 自行管理，与 Anaconda 隔离）。
+
+---
+
+### 问题三：Windows 终端 emoji 乱码（`UnicodeEncodeError`）
+
+**现象：**
+
+```
+UnicodeEncodeError: 'gbk' codec can't encode character '\u2705'
+```
+
+**原因：** Windows 默认终端编码为 GBK，无法显示 `✅` `🎉` 等 emoji。
+
+**解决方法：** 本项目已在 `cli.py` 启动时自动将 stdout/stderr 切换为 UTF-8。如仍遇到此问题，可在运行前设置：
+
+```bash
+# PowerShell
+$env:PYTHONUTF8="1"; uv run nexustrader-mcp setup
+
+# 或在 Windows Terminal 中将默认编码设为 UTF-8
+chcp 65001
+```
 
 ---
 

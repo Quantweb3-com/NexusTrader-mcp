@@ -1,3 +1,26 @@
 {
-  "mcpServers": {}
+  "mcpServers": {
+    "nexustrader": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "H:\\code\\github\\Quantweb3-com\\NexusTrader-mcp",
+        "run",
+        "--python",
+        "3.11",
+        "nexustrader-mcp",
+        "--config",
+        "H:\\code\\github\\Quantweb3-com\\NexusTrader-mcp\\config.yaml"
+      ],
+      "env": {
+        "PYTHONPATH": "",
+        "PYTHONHOME": "",
+        "CONDA_PREFIX": "",
+        "CONDA_DEFAULT_ENV": "",
+        "CONDA_SHLVL": "0",
+        "UV_PYTHON_PREFERENCE": "only-managed",
+        "UV_PYTHON": "cpython-3.11"
+      }
+    }
+  }
 }

@@ -1,2 +1,16 @@
 .venv
 __pycache__
+
+# 用户配置（含真实路径，机器相关）
+config.yaml
+.claude/mcp.json
+.claude/settings.local.json
+.cursor/mcp.json
+.claude/commands/nexustrader/
+
+# 凭证（绝对不能提交）
+.keys/.secrets.toml
+.keys/*.toml
+!.keys/*.toml.template
+commands
+/.keys/cache.db

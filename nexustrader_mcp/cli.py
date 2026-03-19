@@ -12,6 +12,12 @@ from typing import Optional
 import click
 import yaml
 
+# Ensure stdout/stderr use UTF-8 on Windows (avoid GBK encoding errors)
+if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if sys.stderr.encoding and sys.stderr.encoding.lower() not in ("utf-8", "utf8"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 
 # ──────────────────────────────────────────────────────
 # Account type definitions for the interactive wizard
@@ -81,9 +87,18 @@ def _generate_mcp_json(project_dir: str, config_path: str) -> dict:
         "command": "uv",
         "args": [
             "--directory", project_dir,
-            "run", "nexustrader-mcp",
+            "run", "--python", "3.11", "nexustrader-mcp",
             "--config", config_path,
         ],
+        "env": {
+            "PYTHONPATH": "",
+            "PYTHONHOME": "",
+            "CONDA_PREFIX": "",
+            "CONDA_DEFAULT_ENV": "",
+            "CONDA_SHLVL": "0",
+            "UV_PYTHON_PREFERENCE": "only-managed",
+            "UV_PYTHON": "cpython-3.11",
+        },
     }
 
 
@@ -175,7 +190,7 @@ def setup(config_only: bool, install_only: bool):
             )
             symbols = [s.strip() for s in raw_symbols.split(",") if s.strip()]
 
-            cfg = {"account_type": at}
+            cfg = {"account_type": at.lower()}
             if symbols:
                 cfg["symbols"] = symbols
                 cfg["subscribe"] = ["bookl1"]
@@ -221,16 +236,29 @@ def setup(config_only: bool, install_only: bool):
     if installed:
         click.echo(f"✅ 已安装 {len(installed)} 个 Claude Code 技能：" + ", ".join(f"/{s}" for s in installed))
 
-    # ── Global user configs (optional) ──
-    cursor_path = Path.home() / ".cursor" / "mcp.json"
-    if click.confirm(f"\n同时写入全局 Cursor 配置 ({cursor_path})？", default=False):
-        _write_mcp_config(cursor_path, server_entry)
-        click.echo(f"✅ 已写入全局 Cursor MCP 配置")
+    # ── Bootstrap .secrets.toml from template ──
+    secrets_path = Path(project_dir) / ".keys" / ".secrets.toml"
+    secrets_template = Path(project_dir) / ".keys" / ".secrets.toml.template"
+    if not secrets_path.is_file() and secrets_template.is_file():
+        shutil.copy2(secrets_template, secrets_path)
+        click.echo(f"\n📋 已创建 {secrets_path}")
+        click.echo("   ⚠️  请打开该文件，将各交易所的 API_KEY / SECRET 替换为真实凭证后再启动服务器。")
+    elif not secrets_path.is_file():
+        click.echo(f"\n⚠️  未找到 {secrets_path}，请手动创建并填入 API 凭证。")
 
-    claude_path = Path.home() / ".claude" / "settings.json"
-    if click.confirm(f"同时写入全局 Claude Code 配置 ({claude_path})？", default=False):
-        _write_mcp_config(claude_path, server_entry)
-        click.echo(f"✅ 已写入全局 Claude Code MCP 配置")
+    # ── Global user configs (optional) ──
+    try:
+        cursor_path = Path.home() / ".cursor" / "mcp.json"
+        if click.confirm(f"\n同时写入全局 Cursor 配置 ({cursor_path})？", default=False):
+            _write_mcp_config(cursor_path, server_entry)
+            click.echo(f"✅ 已写入全局 Cursor MCP 配置")
+
+        claude_path = Path.home() / ".claude.json"
+        if click.confirm(f"同时写入全局 Claude Code 配置 ({claude_path})？", default=False):
+            _write_mcp_config(claude_path, server_entry)
+            click.echo(f"✅ 已写入全局 Claude Code MCP 配置")
+    except click.Abort:
+        pass
 
     click.echo("\n🎉 全部完成！重启 Cursor / Claude Code 即可使用 NexusTrader MCP。")
 
@@ -243,23 +271,12 @@ def run_server(config_path: Optional[str]):
     from nexustrader_mcp.server import create_mcp_server
 
     engine = EngineManager()
-
-    try:
-        engine.start(config_path=config_path)
-    except SystemExit:
-        raise
-    except Exception as e:
-        click.echo(f"引擎启动失败: {e}", err=True)
-        sys.exit(1)
-
-    mcp = create_mcp_server(engine)
+    mcp = create_mcp_server(engine, config_path=config_path)
 
     try:
         mcp.run(transport="stdio")
     except KeyboardInterrupt:
         pass
-    finally:
-        engine.stop()
 
 
 # Allow `nexustrader-mcp --config xxx` as shortcut for `nexustrader-mcp run --config xxx`
