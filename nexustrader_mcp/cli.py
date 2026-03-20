@@ -82,8 +82,8 @@ def _multi_pick(prompt: str, options: list[str]) -> list[str]:
     return [options[i - 1] for i in indices if 1 <= i <= len(options)]
 
 
-def _generate_mcp_json(project_dir: str, config_path: str) -> dict:
-    return {
+def _generate_mcp_json(project_dir: str, config_path: str, *, transport_field: bool = False) -> dict:
+    entry = {
         "command": "uv",
         "args": [
             "--directory", project_dir,
@@ -100,6 +100,9 @@ def _generate_mcp_json(project_dir: str, config_path: str) -> dict:
             "UV_PYTHON": "cpython-3.11",
         },
     }
+    if transport_field:
+        entry["transport"] = "stdio"
+    return entry
 
 
 def _install_skills(project_dir: str, target_dir: Path) -> list[str]:
@@ -218,6 +221,7 @@ def setup(config_only: bool, install_only: bool):
         return
 
     server_entry = _generate_mcp_json(project_dir, config_path)
+    openclaw_entry = _generate_mcp_json(project_dir, config_path, transport_field=True)
 
     click.echo("\n─── 安装到 AI 客户端 ───")
 
@@ -251,16 +255,22 @@ def setup(config_only: bool, install_only: bool):
         cursor_path = Path.home() / ".cursor" / "mcp.json"
         if click.confirm(f"\n同时写入全局 Cursor 配置 ({cursor_path})？", default=False):
             _write_mcp_config(cursor_path, server_entry)
-            click.echo(f"✅ 已写入全局 Cursor MCP 配置")
+            click.echo("✅ 已写入全局 Cursor MCP 配置")
 
         claude_path = Path.home() / ".claude.json"
         if click.confirm(f"同时写入全局 Claude Code 配置 ({claude_path})？", default=False):
             _write_mcp_config(claude_path, server_entry)
-            click.echo(f"✅ 已写入全局 Claude Code MCP 配置")
+            click.echo("✅ 已写入全局 Claude Code MCP 配置")
+
+        openclaw_path = Path.home() / ".openclaw" / "openclaw.json"
+        if click.confirm(f"同时写入全局 OpenClaw 配置 ({openclaw_path})？", default=False):
+            _write_mcp_config(openclaw_path, openclaw_entry)
+            click.echo("✅ 已写入全局 OpenClaw MCP 配置")
+            click.echo("   运行 `openclaw gateway restart` 使配置生效")
     except click.Abort:
         pass
 
-    click.echo("\n🎉 全部完成！重启 Cursor / Claude Code 即可使用 NexusTrader MCP。")
+    click.echo("\n🎉 全部完成！重启 Cursor / Claude Code / OpenClaw 即可使用 NexusTrader MCP。")
 
 
 class _StderrProxy:

@@ -5,7 +5,7 @@ description: 完整投资组合总览：余额 + 持仓 + 挂单汇总
 依次调用以下工具，生成投资组合全景报告：
 1. `get_all_balances()` — 获取所有账户余额
 2. `get_all_positions()` — 获取所有持仓
-3. `get_open_orders()` — 获取所有挂单
+3. `get_exchange_info()` 获取交易所列表，再逐一 `get_open_orders(exchange=...)` — 获取所有挂单
 
 输出格式（Markdown 表格）：
 

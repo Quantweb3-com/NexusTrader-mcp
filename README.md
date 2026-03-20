@@ -2,7 +2,17 @@
 
 让 AI 直接操控你的加密货币交易账户。
 
-NexusTrader MCP 是一个 [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) 服务器，将 [NexusTrader](https://github.com/Quantweb3-com/NexusTrader) 的账户查询、实时行情和交易功能暴露给 AI 客户端。通过 **stdio** 传输方式在本地运行，支持 **Cursor** 和 **Claude Code**。
+NexusTrader MCP 是一个 [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) 服务器，将 [NexusTrader](https://github.com/Quantweb3-com/NexusTrader) 的账户查询、实时行情和交易功能暴露给 AI 客户端。通过 **stdio** 传输方式在本地运行，支持 **Cursor**、**Claude Code** 和 **OpenClaw**。
+
+### 平台兼容性
+
+| 平台 | Cursor | Claude Code | OpenClaw |
+|------|--------|-------------|----------|
+| **Windows** | ✅ 支持 | ❌ 暂不支持 | ✅ 支持 |
+| **Linux** | ✅ 支持 | ✅ 支持 | ✅ 支持 |
+| **macOS** | ✅ 支持 | ✅ 支持 | ✅ 支持 |
+
+> **Windows 用户注意**：Claude Code 在 Windows 下启动 MCP 子进程时存在兼容性问题，建议使用 Cursor、OpenClaw 或 WSL 环境下的 Claude Code。
 
 ## 功能一览
 
@@ -66,7 +76,7 @@ uv run nexustrader-mcp setup
 4. 预订阅的交易对（可跳过）
 5. 确认凭证来源（默认读取 `.keys/.secrets.toml`）
 
-然后自动询问是否写入 Cursor 和 Claude Code 的配置文件。确认后重启 IDE 即可使用。
+然后自动询问是否写入 Cursor、Claude Code 和 OpenClaw 的配置文件。确认后重启客户端即可使用。
 
 ### 方式二：手动配置
 
@@ -152,21 +162,33 @@ uv run nexustrader-mcp setup
       "command": "uv",
       "args": [
         "--directory", "/path/to/NexusTrader-mcp",
-        "run", "nexustrader-mcp",
+        "run", "--python", "3.11",
+        "nexustrader-mcp",
         "--config", "/path/to/NexusTrader-mcp/config.yaml"
-      ]
+      ],
+      "env": {
+        "PYTHONPATH": "",
+        "PYTHONHOME": "",
+        "CONDA_PREFIX": "",
+        "CONDA_DEFAULT_ENV": "",
+        "CONDA_SHLVL": "0",
+        "UV_PYTHON_PREFERENCE": "only-managed",
+        "UV_PYTHON": "cpython-3.11"
+      }
     }
   }
 }
 ```
 
-> 将 `/path/to/NexusTrader-mcp` 替换为本项目的实际绝对路径。
+> 将 `/path/to/NexusTrader-mcp` 替换为本项目的实际绝对路径。`env` 部分用于隔离 Anaconda 等外部 Python 环境的干扰。
 
 重启 Cursor 后，在 Agent 模式下即可使用 NexusTrader 工具。
 
 ---
 
 ## 对接 Claude Code
+
+> ⚠️ **仅支持 Linux / macOS**。Windows 下的 Claude Code 暂不支持，建议 Windows 用户使用 Cursor 或在 WSL 中运行 Claude Code。
 
 ### 自动写入
 
@@ -186,15 +208,83 @@ uv run nexustrader-mcp setup
       "command": "uv",
       "args": [
         "--directory", "/path/to/NexusTrader-mcp",
-        "run", "nexustrader-mcp",
+        "run", "--python", "3.11",
+        "nexustrader-mcp",
         "--config", "/path/to/NexusTrader-mcp/config.yaml"
-      ]
+      ],
+      "env": {
+        "PYTHONPATH": "",
+        "PYTHONHOME": "",
+        "CONDA_PREFIX": "",
+        "CONDA_DEFAULT_ENV": "",
+        "CONDA_SHLVL": "0",
+        "UV_PYTHON_PREFERENCE": "only-managed",
+        "UV_PYTHON": "cpython-3.11"
+      }
     }
   }
 }
 ```
 
 重启 Claude Code 后即可使用。
+
+---
+
+## 对接 OpenClaw
+
+[OpenClaw](https://www.openclaw.ai/) 是一个开源的本地 AI 助手，支持 MCP 协议。
+
+### 自动写入
+
+```bash
+uv run nexustrader-mcp setup
+# 向导最后会询问是否写入 OpenClaw 配置，选 Y 即可
+```
+
+写入后执行：
+
+```bash
+openclaw gateway restart
+```
+
+### 手动配置
+
+编辑 `~/.openclaw/openclaw.json`：
+
+```json
+{
+  "mcpServers": {
+    "nexustrader": {
+      "command": "uv",
+      "args": [
+        "--directory", "/path/to/NexusTrader-mcp",
+        "run", "--python", "3.11",
+        "nexustrader-mcp",
+        "--config", "/path/to/NexusTrader-mcp/config.yaml"
+      ],
+      "transport": "stdio",
+      "env": {
+        "PYTHONPATH": "",
+        "PYTHONHOME": "",
+        "CONDA_PREFIX": "",
+        "CONDA_DEFAULT_ENV": "",
+        "CONDA_SHLVL": "0",
+        "UV_PYTHON_PREFERENCE": "only-managed",
+        "UV_PYTHON": "cpython-3.11"
+      }
+    }
+  }
+}
+```
+
+配置后重启 gateway 并验证：
+
+```bash
+openclaw gateway restart
+openclaw mcp list          # 确认 nexustrader 已加载
+```
+
+之后在 OpenClaw 的任意聊天渠道（WhatsApp、Telegram、Discord 等）中即可通过自然语言访问交易数据。
 
 ---
 
@@ -307,7 +397,7 @@ npx @modelcontextprotocol/inspector uv run nexustrader-mcp
 
 ## AI 使用示例
 
-配置完成后，你可以在 Cursor 或 Claude Code 中这样与 AI 对话：
+配置完成后，你可以在 Cursor、Claude Code 或 OpenClaw 中这样与 AI 对话：
 
 > **你**：查看我的 Binance 合约账户余额和当前 BTC 持仓
 
@@ -345,17 +435,26 @@ AI 会调用 `create_order`，然后回复：
 
 **Q: 引擎启动超时？**
 
-通常是交易所连接问题，检查网络和 API 凭证。测试网用户确认 `account_type` 包含 `TESTNET` 或 `DEMO`。
+通常是交易所 WebSocket 连接问题。排查步骤：
+1. 检查网络是否能访问交易所 API（可能需要代理）
+2. 确认 API 凭证正确（`.keys/.secrets.toml`）
+3. 确认没有其他进程占用同一 API Key 的 WebSocket 连接
+4. 测试网用户确认 `account_type` 包含 `TESTNET` 或 `DEMO`
+
+**Q: Windows 下 Claude Code 无法使用？**
+
+目前 Claude Code 在 Windows 下启动 MCP 子进程存在兼容性问题，暂不支持。Windows 用户请使用 **Cursor**，或在 **WSL (Windows Subsystem for Linux)** 中运行 Claude Code。
 
 **Q: Claude Code 中 MCP 服务器启动报错 / uv 环境冲突？**
 
 请确保你 **没有在 Anaconda Prompt 中启动 Claude Code**。详见下方「Anaconda 用户注意事项」。
 
-**Q: Cursor / Claude Code 里看不到 NexusTrader 工具？**
+**Q: Cursor / Claude Code / OpenClaw 里看不到 NexusTrader 工具？**
 
-1. 确认配置文件已写入（`~/.cursor/mcp.json` 或 `~/.claude/settings.json`）
-2. 重启 IDE
+1. 确认配置文件已写入（`~/.cursor/mcp.json`、`~/.claude.json` 或 `~/.openclaw/openclaw.json`）
+2. 重启客户端（Cursor 重启 IDE，OpenClaw 执行 `openclaw gateway restart`）
 3. 确认 `uv` 在 PATH 中可用
+4. OpenClaw 可用 `openclaw mcp list` 检查 server 是否加载
 
 ---
 

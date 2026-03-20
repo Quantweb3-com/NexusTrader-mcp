@@ -2,8 +2,8 @@
 description: 查看挂单。用法：/orders [symbol] [exchange]
 ---
 
-根据 `$ARGUMENTS` 查询挂单：
-- 无参数：调用 `get_open_orders()` 获取所有挂单
+根据 `$ARGUMENTS` 查询挂单（必须提供 symbol 或 exchange 之一）：
+- 无参数：先调用 `get_exchange_info()` 获取所有交易所，再逐一调用 `get_open_orders(exchange=...)` 汇总
 - 参数是交易对：调用 `get_open_orders(symbol=...)`
 - 参数是交易所名称：调用 `get_open_orders(exchange=...)`
 
