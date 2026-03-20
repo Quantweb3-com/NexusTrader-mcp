@@ -82,8 +82,8 @@ def _multi_pick(prompt: str, options: list[str]) -> list[str]:
     return [options[i - 1] for i in indices if 1 <= i <= len(options)]
 
 
-def _generate_mcp_json(project_dir: str, config_path: str, *, transport_field: bool = False) -> dict:
-    entry = {
+def _generate_mcp_json(project_dir: str, config_path: str) -> dict:
+    return {
         "command": "uv",
         "args": [
             "--directory", project_dir,
@@ -100,9 +100,43 @@ def _generate_mcp_json(project_dir: str, config_path: str, *, transport_field: b
             "UV_PYTHON": "cpython-3.11",
         },
     }
-    if transport_field:
-        entry["transport"] = "stdio"
-    return entry
+
+
+def _generate_openclaw_plugin_config(project_dir: str, config_path: str) -> dict:
+    """Generate OpenClaw MCP bridge plugin config for openclaw.json."""
+    return {
+        "plugins": {
+            "entries": {
+                "openclaw-mcp-bridge": {
+                    "config": {
+                        "mode": "router",
+                        "servers": {
+                            "nexustrader": {
+                                "transport": "stdio",
+                                "command": "uv",
+                                "args": [
+                                    "--directory", project_dir,
+                                    "run", "--python", "3.11",
+                                    "nexustrader-mcp",
+                                    "--config", config_path,
+                                ],
+                                "env": {
+                                    "PYTHONPATH": "",
+                                    "PYTHONHOME": "",
+                                    "CONDA_PREFIX": "",
+                                    "CONDA_DEFAULT_ENV": "",
+                                    "CONDA_SHLVL": "0",
+                                    "UV_PYTHON_PREFERENCE": "only-managed",
+                                    "UV_PYTHON": "cpython-3.11",
+                                },
+                                "description": "NexusTrader crypto trading: balances, positions, market data, orders",
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    }
 
 
 def _install_skills(project_dir: str, target_dir: Path) -> list[str]:
@@ -130,6 +164,30 @@ def _write_mcp_config(filepath: Path, server_entry: dict):
 
     servers = data.setdefault("mcpServers", {})
     servers["nexustrader"] = server_entry
+    filepath.parent.mkdir(parents=True, exist_ok=True)
+    filepath.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    """Recursively merge override into base (mutates base)."""
+    for k, v in override.items():
+        if k in base and isinstance(base[k], dict) and isinstance(v, dict):
+            _deep_merge(base[k], v)
+        else:
+            base[k] = v
+    return base
+
+
+def _write_openclaw_config(filepath: Path, plugin_config: dict):
+    """Merge OpenClaw MCP bridge plugin config into openclaw.json."""
+    data = {}
+    if filepath.is_file():
+        try:
+            data = json.loads(filepath.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            data = {}
+
+    _deep_merge(data, plugin_config)
     filepath.parent.mkdir(parents=True, exist_ok=True)
     filepath.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
@@ -221,7 +279,6 @@ def setup(config_only: bool, install_only: bool):
         return
 
     server_entry = _generate_mcp_json(project_dir, config_path)
-    openclaw_entry = _generate_mcp_json(project_dir, config_path, transport_field=True)
 
     click.echo("\n─── 安装到 AI 客户端 ───")
 
@@ -263,10 +320,14 @@ def setup(config_only: bool, install_only: bool):
             click.echo("✅ 已写入全局 Claude Code MCP 配置")
 
         openclaw_path = Path.home() / ".openclaw" / "openclaw.json"
-        if click.confirm(f"同时写入全局 OpenClaw 配置 ({openclaw_path})？", default=False):
-            _write_mcp_config(openclaw_path, openclaw_entry)
-            click.echo("✅ 已写入全局 OpenClaw MCP 配置")
-            click.echo("   运行 `openclaw gateway restart` 使配置生效")
+        if click.confirm(f"\n同时写入 OpenClaw 配置 ({openclaw_path})？", default=False):
+            openclaw_plugin_config = _generate_openclaw_plugin_config(project_dir, config_path)
+            _write_openclaw_config(openclaw_path, openclaw_plugin_config)
+            click.echo("✅ 已写入 OpenClaw MCP bridge 插件配置")
+            click.echo("   后续步骤：")
+            click.echo("   1. 安装插件: openclaw plugins install @aiwerk/openclaw-mcp-bridge")
+            click.echo("   2. 重启网关: openclaw gateway restart")
+            click.echo("   3. 验证加载: openclaw mcp list")
     except click.Abort:
         pass
 

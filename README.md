@@ -232,7 +232,15 @@ uv run nexustrader-mcp setup
 
 ## 对接 OpenClaw
 
-[OpenClaw](https://www.openclaw.ai/) 是一个开源的本地 AI 助手，支持 MCP 协议。
+[OpenClaw](https://www.openclaw.ai/) 是一个开源的本地 AI 助手。OpenClaw **尚未内置** MCP 配置支持（[PR #44916](https://github.com/openclaw/openclaw/pull/44916) 进行中），目前需要通过社区插件 **[@aiwerk/openclaw-mcp-bridge](https://github.com/AIWerk/openclaw-mcp-bridge)** 来桥接 MCP Server。
+
+### 前置步骤：安装 MCP Bridge 插件
+
+```bash
+openclaw plugins install @aiwerk/openclaw-mcp-bridge
+```
+
+> 注意：必须使用完整的 scoped 名称 `@aiwerk/openclaw-mcp-bridge`。
 
 ### 自动写入
 
@@ -245,37 +253,50 @@ uv run nexustrader-mcp setup
 
 ```bash
 openclaw gateway restart
+openclaw mcp list          # 确认 nexustrader 已加载
 ```
 
 ### 手动配置
 
-编辑 `~/.openclaw/openclaw.json`：
+编辑 `~/.openclaw/openclaw.json`，在 `plugins.entries` 下添加 MCP bridge 配置：
 
 ```json
 {
-  "mcpServers": {
-    "nexustrader": {
-      "command": "uv",
-      "args": [
-        "--directory", "/path/to/NexusTrader-mcp",
-        "run", "--python", "3.11",
-        "nexustrader-mcp",
-        "--config", "/path/to/NexusTrader-mcp/config.yaml"
-      ],
-      "transport": "stdio",
-      "env": {
-        "PYTHONPATH": "",
-        "PYTHONHOME": "",
-        "CONDA_PREFIX": "",
-        "CONDA_DEFAULT_ENV": "",
-        "CONDA_SHLVL": "0",
-        "UV_PYTHON_PREFERENCE": "only-managed",
-        "UV_PYTHON": "cpython-3.11"
+  "plugins": {
+    "entries": {
+      "openclaw-mcp-bridge": {
+        "config": {
+          "mode": "router",
+          "servers": {
+            "nexustrader": {
+              "transport": "stdio",
+              "command": "uv",
+              "args": [
+                "--directory", "/path/to/NexusTrader-mcp",
+                "run", "--python", "3.11",
+                "nexustrader-mcp",
+                "--config", "/path/to/NexusTrader-mcp/config.yaml"
+              ],
+              "env": {
+                "PYTHONPATH": "",
+                "PYTHONHOME": "",
+                "CONDA_PREFIX": "",
+                "CONDA_DEFAULT_ENV": "",
+                "CONDA_SHLVL": "0",
+                "UV_PYTHON_PREFERENCE": "only-managed",
+                "UV_PYTHON": "cpython-3.11"
+              },
+              "description": "NexusTrader crypto trading"
+            }
+          }
+        }
       }
     }
   }
 }
 ```
+
+> 将 `/path/to/NexusTrader-mcp` 替换为实际绝对路径。`mode` 设为 `"router"` 时所有 MCP 工具通过统一入口调用，适合多 server 场景；如只有 NexusTrader 一个 server，也可改为 `"direct"`。
 
 配置后重启 gateway 并验证：
 
@@ -454,7 +475,8 @@ AI 会调用 `create_order`，然后回复：
 1. 确认配置文件已写入（`~/.cursor/mcp.json`、`~/.claude.json` 或 `~/.openclaw/openclaw.json`）
 2. 重启客户端（Cursor 重启 IDE，OpenClaw 执行 `openclaw gateway restart`）
 3. 确认 `uv` 在 PATH 中可用
-4. OpenClaw 可用 `openclaw mcp list` 检查 server 是否加载
+4. OpenClaw 需先安装 MCP bridge 插件：`openclaw plugins install @aiwerk/openclaw-mcp-bridge`
+5. OpenClaw 可用 `openclaw mcp list` 检查 server 是否加载
 
 ---
 
