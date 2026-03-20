@@ -89,6 +89,17 @@ class EngineManager:
             import nexustrader as _nt
             _log(f"imports done ({time.time()-t0:.1f}s) | NexusTrader: {_nt.__file__}")
 
+            # uvloop raises ValueError (not RuntimeError) from a non-main thread;
+            # patch TaskManager to tolerate this before Engine is created.
+            from nexustrader.core.entity import TaskManager as _TM
+            _orig_setup = _TM._setup_signal_handlers
+            def _safe_setup(self_tm):
+                try:
+                    _orig_setup(self_tm)
+                except (NotImplementedError, RuntimeError, ValueError):
+                    pass
+            _TM._setup_signal_handlers = _safe_setup
+
             self._strategy = MCPStrategy()
             path = find_config_path(config_path)
             _log(f"config: {path}")
