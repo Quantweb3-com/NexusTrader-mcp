@@ -102,33 +102,63 @@ def _generate_mcp_json(project_dir: str, config_path: str) -> dict:
     }
 
 
-def _generate_mcp_bridge_config(project_dir: str, config_path: str) -> dict:
-    """Generate mcp-bridge config for ~/.mcp-bridge/config.json."""
-    return {
-        "mode": "router",
-        "servers": {
-            "nexustrader": {
-                "transport": "stdio",
-                "command": "uv",
-                "args": [
-                    "--directory", project_dir,
-                    "run", "--python", "3.11",
-                    "nexustrader-mcp",
-                    "--config", config_path,
-                ],
-                "env": {
-                    "PYTHONPATH": "",
-                    "PYTHONHOME": "",
-                    "CONDA_PREFIX": "",
-                    "CONDA_DEFAULT_ENV": "",
-                    "CONDA_SHLVL": "0",
-                    "UV_PYTHON_PREFERENCE": "only-managed",
-                    "UV_PYTHON": "cpython-3.11",
-                },
-                "description": "NexusTrader crypto trading: balances, positions, market data, orders",
-            },
-        },
+
+def _install_openclaw_skill(project_dir: str, skill_dir: Path, config_path: str) -> None:
+    """将 OpenClaw Skill 文件安装到 ~/.openclaw/skills/nexustrader/。"""
+    import datetime
+
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "logs").mkdir(exist_ok=True)
+
+    openclaw_src = Path(project_dir) / "openclaw"
+    for fname in ["SKILL.md", "bridge.py", "nexustrader_daemon.sh"]:
+        src = openclaw_src / fname
+        if src.is_file():
+            shutil.copy2(src, skill_dir / fname)
+
+    # Make daemon script executable (Linux/macOS only; silently skip on Windows)
+    daemon_sh = skill_dir / "nexustrader_daemon.sh"
+    if daemon_sh.is_file():
+        try:
+            daemon_sh.chmod(0o755)
+        except OSError:
+            pass
+
+    # Auto-generate .env with all paths pre-filled — user never needs to edit this
+    env_content = (
+        "# NexusTrader MCP — OpenClaw Skill 配置\n"
+        "# 由 nexustrader-mcp setup 自动生成，无需手动编辑\n\n"
+        f"NEXUSTRADER_PROJECT_DIR={project_dir}\n"
+        f"NEXUSTRADER_MCP_CONFIG={config_path}\n"
+        "NEXUSTRADER_MCP_PORT=18765\n"
+        "NEXUSTRADER_MCP_HOST=127.0.0.1\n"
+        "NEXUSTRADER_MCP_URL=http://127.0.0.1:18765/sse\n"
+        f"NEXUSTRADER_LOG_DIR={skill_dir / 'logs'}\n"
+    )
+    (skill_dir / ".env").write_text(env_content, encoding="utf-8")
+
+    # Register in ~/.openclaw/skills/index.json
+    index_path = skill_dir.parent / "index.json"
+    index_data: dict = {}
+    if index_path.is_file():
+        try:
+            index_data = json.loads(index_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            index_data = {}
+    skills = index_data.setdefault("skills", [])
+    entry = {
+        "id": "nexustrader",
+        "name": "NexusTrader 量化交易助手",
+        "path": str(skill_dir),
+        "skill_file": str(skill_dir / "SKILL.md"),
+        "installed_at": datetime.datetime.now().isoformat(),
     }
+    existing_idx = next((i for i, s in enumerate(skills) if s.get("id") == "nexustrader"), None)
+    if existing_idx is not None:
+        skills[existing_idx] = entry
+    else:
+        skills.append(entry)
+    index_path.write_text(json.dumps(index_data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
 def _install_skills(project_dir: str, target_dir: Path) -> list[str]:
@@ -159,29 +189,6 @@ def _write_mcp_config(filepath: Path, server_entry: dict):
     filepath.parent.mkdir(parents=True, exist_ok=True)
     filepath.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
-
-def _deep_merge(base: dict, override: dict) -> dict:
-    """Recursively merge override into base (mutates base)."""
-    for k, v in override.items():
-        if k in base and isinstance(base[k], dict) and isinstance(v, dict):
-            _deep_merge(base[k], v)
-        else:
-            base[k] = v
-    return base
-
-
-def _write_mcp_bridge_config(filepath: Path, bridge_config: dict):
-    """Merge nexustrader server into existing mcp-bridge config.json."""
-    data = {}
-    if filepath.is_file():
-        try:
-            data = json.loads(filepath.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            data = {}
-
-    _deep_merge(data, bridge_config)
-    filepath.parent.mkdir(parents=True, exist_ok=True)
-    filepath.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
 # ──────────────────────────────────────────────────────
@@ -310,20 +317,25 @@ def setup(config_only: bool, install_only: bool):
         if click.confirm(f"同时写入全局 Claude Code 配置 ({claude_path})？", default=False):
             _write_mcp_config(claude_path, server_entry)
             click.echo("✅ 已写入全局 Claude Code MCP 配置")
-
-        mcp_bridge_path = Path.home() / ".mcp-bridge" / "config.json"
-        if click.confirm(f"\n同时写入 OpenClaw / mcp-bridge 配置 ({mcp_bridge_path})？", default=False):
-            bridge_config = _generate_mcp_bridge_config(project_dir, config_path)
-            _write_mcp_bridge_config(mcp_bridge_path, bridge_config)
-            click.echo("✅ 已写入 mcp-bridge 配置")
-            click.echo("   后续步骤：")
-            click.echo("   1. 安装插件: openclaw plugins install @aiwerk/openclaw-mcp-bridge")
-            click.echo("   2. 重启网关: openclaw gateway restart")
-            click.echo("   3. 验证加载: openclaw plugins list")
     except click.Abort:
         pass
 
-    click.echo("\n🎉 全部完成！重启 Cursor / Claude Code / OpenClaw 即可使用 NexusTrader MCP。")
+    # ── Install OpenClaw Skill ──
+    openclaw_src = Path(project_dir) / "openclaw"
+    if openclaw_src.is_dir():
+        openclaw_skill_dir = Path.home() / ".openclaw" / "skills" / "nexustrader"
+        try:
+            if click.confirm(
+                f"\n安装 OpenClaw Skill ({openclaw_skill_dir})？",
+                default=True,
+            ):
+                _install_openclaw_skill(project_dir, openclaw_skill_dir, config_path)
+                click.echo(f"✅ OpenClaw Skill 已安装：{openclaw_skill_dir}")
+                click.echo("   首次在 OpenClaw 中使用时，服务器将自动在后台启动。")
+        except click.Abort:
+            pass
+
+    click.echo("\n🎉 全部完成！重启 Cursor / Claude Code 即可使用 NexusTrader MCP。")
 
 
 class _StderrProxy:
@@ -384,6 +396,34 @@ def run_server(config_path: Optional[str]):
 
     try:
         mcp.run(transport="stdio")
+    except KeyboardInterrupt:
+        pass
+
+
+@main.command(name="serve")
+@click.option("--host", default="127.0.0.1", show_default=True, help="绑定地址")
+@click.option("--port", type=int, default=18765, show_default=True, help="监听端口")
+@click.option("--config", "config_path", default=None, help="配置文件路径")
+def serve_sse(host: str, port: int, config_path: Optional[str]):
+    """以 SSE (HTTP) 模式启动 MCP 服务器，供 OpenClaw 等工具使用。"""
+    from nexustrader_mcp.engine_manager import EngineManager
+    from nexustrader_mcp.server import create_mcp_server
+
+    engine = EngineManager()
+    mcp = create_mcp_server(engine, config_path=config_path)
+
+    click.echo(
+        f"[NexusTrader MCP] SSE server listening on http://{host}:{port}",
+        err=True,
+    )
+    try:
+        try:
+            mcp.run(transport="sse", host=host, port=port)
+        except TypeError:
+            # Fallback for older FastMCP versions
+            os.environ.setdefault("HOST", host)
+            os.environ.setdefault("PORT", str(port))
+            mcp.run(transport="sse")
     except KeyboardInterrupt:
         pass
 
