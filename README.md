@@ -339,20 +339,156 @@ npx @modelcontextprotocol/inspector uv run nexustrader-mcp
 
 ## AI 使用示例
 
-配置完成后，你可以在 Cursor 或 Claude Code 中这样与 AI 对话：
+配置完成后，你可以在 Cursor 或 Claude Code 中直接用自然语言让 AI 调用 MCP 工具。
 
-> **你**：查看我的 Binance 合约账户余额和当前 BTC 持仓
+如果你希望 AI 能查询 `get_orderbook` / `get_funding_rate` / `get_mark_price` / `get_index_price` 这类**缓存行情**，请先在 `config.yaml` 中为对应交易对开启预订阅：
 
-AI 会自动调用 `get_balance` 和 `get_position`，然后回复：
+```yaml
+exchanges:
+  binance:
+    account_type: USD_M_FUTURE_TESTNET
+    symbols:
+      - BTCUSDT-PERP.BINANCE
+      - ETHUSDT-PERP.BINANCE
+    subscribe:
+      - bookl1
+      - funding_rate
+      - mark_price
+      - index_price
+```
 
-> 您的 Binance 合约账户余额为 $10,523.45（可用 $8,200）。
-> 当前持有 0.5 BTC 多头仓位，入场价 $67,450.20，未实现盈亏 +$125.50。
+下面是一组尽量覆盖全部功能的对话示例：
 
-> **你**：挂一个 0.1 BTC 的限价卖单，价格 68000
+### 1. 查看已连接的交易所
 
-AI 会调用 `create_order`，然后回复：
+> **你**：先告诉我现在 MCP 连上了哪些交易所和账户类型
 
-> 限价卖单已挂出：0.1 BTC @ $68,000。订单 ID：mcp-xxx-001，状态：已接受。
+AI 会调用 `get_exchange_info`。
+
+### 2. 查看可用交易对
+
+> **你**：列出 Binance 可交易的永续合约交易对，先给我前 20 个
+
+AI 会调用 `get_symbols(exchange="binance", instrument_type="linear")`。
+
+### 3. 查询交易规则
+
+> **你**：查看 `BTCUSDT-PERP.BINANCE` 的最小下单数量、价格精度和手续费
+
+AI 会调用 `get_market_info(symbol="BTCUSDT-PERP.BINANCE")`。
+
+### 4. 查看所有账户余额
+
+> **你**：把我当前所有已配置账户的余额都汇总一下
+
+AI 会调用 `get_all_balances`。
+
+### 5. 查看单个账户余额
+
+> **你**：查看我的 Binance `USD_M_FUTURE_TESTNET` 余额
+
+AI 会调用 `get_balance(exchange="binance", account_type="USD_M_FUTURE_TESTNET")`。
+
+### 6. 查看单个持仓
+
+> **你**：我现在 `BTCUSDT-PERP.BINANCE` 有持仓吗
+
+AI 会调用 `get_position(symbol="BTCUSDT-PERP.BINANCE")`。
+
+### 7. 查看全部持仓
+
+> **你**：列出我在 Binance 的全部持仓，并按盈亏排序
+
+AI 会调用 `get_all_positions(exchange="binance")`。
+
+### 8. 查询最新成交价
+
+> **你**：查一下 `ETHUSDT-PERP.BINANCE` 最新价格
+
+AI 会调用 `get_ticker(symbol="ETHUSDT-PERP.BINANCE")`。
+
+### 9. 查询 L1 盘口
+
+> **你**：看一下 `BTCUSDT-PERP.BINANCE` 现在的最优买一卖一和点差
+
+AI 会调用 `get_orderbook(symbol="BTCUSDT-PERP.BINANCE")`。
+
+### 10. 查询历史 K 线
+
+> **你**：拉取 `BTCUSDT-PERP.BINANCE` 最近 200 根 1 小时 K 线，顺便总结一下趋势
+
+AI 会调用 `get_klines(symbol="BTCUSDT-PERP.BINANCE", interval="1h", limit=200)`。
+
+### 11. 查询资金费率、标记价格、指数价格
+
+> **你**：帮我看 `BTCUSDT-PERP.BINANCE` 当前资金费率、标记价格和指数价格
+
+AI 会组合调用：
+
+- `get_funding_rate(symbol="BTCUSDT-PERP.BINANCE")`
+- `get_mark_price(symbol="BTCUSDT-PERP.BINANCE")`
+- `get_index_price(symbol="BTCUSDT-PERP.BINANCE")`
+
+### 12. 下单
+
+> **你**：在 `BTCUSDT-PERP.BINANCE` 挂一个 0.01 BTC 的限价买单，价格 68000
+
+AI 会调用 `create_order(symbol="BTCUSDT-PERP.BINANCE", side="BUY", type="LIMIT", amount="0.01", price="68000")`。
+
+### 13. 市价减仓
+
+> **你**：把我 `ETHUSDT-PERP.BINANCE` 当前多头市价减仓 25%，只减仓不要开新仓
+
+AI 通常会先调用 `get_position` 确认仓位，再调用 `create_order(..., type="MARKET", reduce_only=true)`。
+
+### 14. 查询当前挂单
+
+> **你**：列出我在 Binance 现在所有未成交挂单
+
+AI 会调用 `get_open_orders(exchange="binance")`。
+
+也可以按交易对查询：
+
+> **你**：查看 `BTCUSDT-PERP.BINANCE` 这个交易对当前有哪些挂单
+
+AI 会调用 `get_open_orders(symbol="BTCUSDT-PERP.BINANCE")`。
+
+### 15. 查询某个订单详情
+
+> **你**：帮我查一下订单 `mcp-xxx-001` 的最新状态
+
+AI 会调用 `get_order(oid="mcp-xxx-001")`。
+
+### 16. 改单
+
+> **你**：把订单 `mcp-xxx-001` 改成 68150，数量改成 0.02
+
+AI 会调用 `modify_order(symbol="BTCUSDT-PERP.BINANCE", oid="mcp-xxx-001", price="68150", amount="0.02")`。
+
+### 17. 撤销单个订单
+
+> **你**：撤掉 `BTCUSDT-PERP.BINANCE` 上的订单 `mcp-xxx-001`
+
+AI 会调用 `cancel_order(symbol="BTCUSDT-PERP.BINANCE", oid="mcp-xxx-001")`。
+
+### 18. 一键撤销某交易对全部挂单
+
+> **你**：把 `BTCUSDT-PERP.BINANCE` 的所有挂单全部撤掉
+
+AI 会调用 `cancel_all_orders(symbol="BTCUSDT-PERP.BINANCE")`。
+
+### 19. 让 AI 自动组合多步调用
+
+> **你**：先检查我在 Binance 合约账户的 USDT 余额，再看 `BTCUSDT-PERP.BINANCE` 的最新价和盘口，如果价格离 68000 很近，就帮我挂一个 0.01 BTC 的 post-only 买单
+
+AI 可能会按顺序组合调用：
+
+- `get_balance`
+- `get_ticker`
+- `get_orderbook`
+- `create_order(type="POST_ONLY", ...)`
+
+也就是说，你通常不需要记住工具名，只要直接描述你的目标即可。
 
 ---
 

@@ -7,14 +7,18 @@
 
 ## 自动启动（on_startup）
 
-每次 OpenClaw 激活本 Skill 时，自动检查并拉起后台 MCP 服务器：
+每次 OpenClaw 激活本 Skill 时，自动检查并拉起后台 MCP 服务器。
+以下命令跨平台（Windows / Linux / macOS 均可用）：
 
 ```bash
-bash "${SKILL_DIR}/nexustrader_daemon.sh" start
+uv --directory "${NEXUSTRADER_PROJECT_DIR}" run nexustrader-mcp start --no-wait
 ```
 
-服务器启动需要约 30–60 秒完成交易引擎初始化，之后所有工具调用均实时响应。
-如果服务器已在运行，此命令立即返回，不会重复启动。
+- `--no-wait`：立即返回，不阻塞 OpenClaw 启动；服务器在后台继续初始化
+- 若服务器已在运行，此命令立即幂等返回，不会重复启动
+- 服务器初始化约需 30–60 秒（交易引擎连接交易所），期间工具调用会短暂等待
+
+`NEXUSTRADER_PROJECT_DIR` 由 `nexustrader-mcp setup` 写入 `${SKILL_DIR}/.env`，OpenClaw 加载 `.env` 后自动可用。
 
 ---
 
@@ -129,24 +133,28 @@ python "${SKILL_DIR}/bridge.py" <tool_name> [--arg=value ...]
 ### 错误处理
 
 - 工具返回 `error` 字段 → 用中文解释原因，给出解决建议
-- 服务器离线 → 提示用户：
+- 服务器离线 → 提示用户（以下命令 Windows/Linux/macOS 均适用）：
   ```
-  MCP 服务器未响应，正在尝试重启...
-  bash ~/.openclaw/skills/nexustrader/nexustrader_daemon.sh restart
+  uv run nexustrader-mcp start
   ```
-- API Key 无效 → 提示填写 `.keys/.secrets.toml`（路径由 `SKILL_DIR` 下的 `.env` 记录）
+- API Key 无效 → 提示填写 `<项目路径>/.keys/.secrets.toml`（路径见 `${SKILL_DIR}/.env` 中的 `NEXUSTRADER_MCP_CONFIG`）
 
 ---
 
 ## 故障排查
 
+以下命令 **Windows / Linux / macOS 均适用**（在项目目录下运行）：
+
 ```bash
-# 查看服务器状态
-bash ~/.openclaw/skills/nexustrader/nexustrader_daemon.sh status
+# 查看服务器是否在线
+uv run nexustrader-mcp status
 
 # 查看启动日志
-bash ~/.openclaw/skills/nexustrader/nexustrader_daemon.sh logs
+uv run nexustrader-mcp logs
 
-# 重启服务器
-bash ~/.openclaw/skills/nexustrader/nexustrader_daemon.sh restart
+# 重启
+uv run nexustrader-mcp stop && uv run nexustrader-mcp start
+
+# Linux/macOS 也可使用 daemon 脚本
+bash ~/.openclaw/skills/nexustrader/nexustrader_daemon.sh status
 ```

@@ -74,25 +74,34 @@ SECRET  = "你的实盘 Secret"
 
 ---
 
-## 手动守护进程管理（可选）
+## 服务器管理命令
 
-通常不需要手动操作，OpenClaw 会自动管理。如需手动：
+以下命令 **Windows / Linux / macOS 均适用**，在项目目录下运行：
 
 ```bash
-# 启动
-bash ~/.openclaw/skills/nexustrader/nexustrader_daemon.sh start
+# 启动后台服务器（含进度等待）
+uv run nexustrader-mcp start
 
-# 状态
-bash ~/.openclaw/skills/nexustrader/nexustrader_daemon.sh status
+# 查看是否在线
+uv run nexustrader-mcp status
 
-# 查看日志
-bash ~/.openclaw/skills/nexustrader/nexustrader_daemon.sh logs
+# 查看最后 50 行日志
+uv run nexustrader-mcp logs
 
-# 实时日志
-bash ~/.openclaw/skills/nexustrader/nexustrader_daemon.sh follow
+# 查看最后 100 行日志
+uv run nexustrader-mcp logs 100
+
+# 停止
+uv run nexustrader-mcp stop
 
 # 重启（修改 config.yaml 后）
-bash ~/.openclaw/skills/nexustrader/nexustrader_daemon.sh restart
+uv run nexustrader-mcp stop && uv run nexustrader-mcp start
+```
+
+Linux / macOS 用户也可使用 daemon 脚本（功能相同，仅封装上述命令）：
+
+```bash
+bash ~/.openclaw/skills/nexustrader/nexustrader_daemon.sh start|stop|status|logs|follow
 ```
 
 ---

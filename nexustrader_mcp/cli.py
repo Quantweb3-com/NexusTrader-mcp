@@ -5,7 +5,10 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
 import sys
+import time
+import urllib.request
 from pathlib import Path
 from typing import Optional
 
@@ -192,6 +195,103 @@ def _write_mcp_config(filepath: Path, server_entry: dict):
 
 
 # ──────────────────────────────────────────────────────
+# OpenClaw daemon helpers (cross-platform start/stop/status)
+# ──────────────────────────────────────────────────────
+
+def _oc_skill_dir() -> Path:
+    return Path.home() / ".openclaw" / "skills" / "nexustrader"
+
+
+def _oc_pid_file() -> Path:
+    return _oc_skill_dir() / "logs" / "server.pid"
+
+
+def _oc_log_file() -> Path:
+    return _oc_skill_dir() / "logs" / "server.log"
+
+
+def _oc_load_env() -> dict:
+    """Parse ~/.openclaw/skills/nexustrader/.env into a dict."""
+    env_file = _oc_skill_dir() / ".env"
+    result: dict = {}
+    if not env_file.is_file():
+        return result
+    for line in env_file.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        result[key.strip()] = val.strip().strip("'\"")
+    return result
+
+
+def _oc_is_running() -> tuple[bool, int]:
+    """Return (is_running, pid). pid=0 when not running."""
+    pid_file = _oc_pid_file()
+    if not pid_file.is_file():
+        return False, 0
+    try:
+        pid = int(pid_file.read_text(encoding="utf-8").strip())
+    except (ValueError, OSError):
+        return False, 0
+    try:
+        os.kill(pid, 0)   # signal 0: existence check only
+        return True, pid
+    except OSError:
+        return False, 0
+
+
+def _oc_http_ok(host: str, port: int) -> bool:
+    """Return True if the SSE server is responding."""
+    for path in ("/", "/sse"):
+        try:
+            with urllib.request.urlopen(
+                f"http://{host}:{port}{path}", timeout=2
+            ) as r:
+                if r.status < 500:
+                    return True
+        except Exception:
+            pass
+    return False
+
+
+def _oc_launch(cmd: list[str], log_file: Path) -> int:
+    """Start a detached background process. Returns PID."""
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    log_fh = open(log_file, "a", encoding="utf-8")  # kept open by child
+    kwargs: dict = dict(stdout=log_fh, stderr=log_fh, stdin=subprocess.DEVNULL)
+    if sys.platform == "win32":
+        kwargs["creationflags"] = (
+            subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+        )
+    else:
+        kwargs["start_new_session"] = True
+    proc = subprocess.Popen(cmd, **kwargs)
+    return proc.pid
+
+
+def _oc_kill(pid: int) -> None:
+    """Terminate a process cross-platform."""
+    if sys.platform == "win32":
+        subprocess.call(
+            ["taskkill", "/F", "/PID", str(pid)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    else:
+        for sig in (15, 9):   # SIGTERM then SIGKILL
+            try:
+                os.kill(pid, sig)
+            except OSError:
+                break
+            time.sleep(2)
+            try:
+                os.kill(pid, 0)
+            except OSError:
+                break   # process gone
+
+
+# ──────────────────────────────────────────────────────
 # CLI commands
 # ──────────────────────────────────────────────────────
 
@@ -322,6 +422,7 @@ def setup(config_only: bool, install_only: bool):
 
     # ── Install OpenClaw Skill ──
     openclaw_src = Path(project_dir) / "openclaw"
+    openclaw_installed = False
     if openclaw_src.is_dir():
         openclaw_skill_dir = Path.home() / ".openclaw" / "skills" / "nexustrader"
         try:
@@ -331,11 +432,31 @@ def setup(config_only: bool, install_only: bool):
             ):
                 _install_openclaw_skill(project_dir, openclaw_skill_dir, config_path)
                 click.echo(f"✅ OpenClaw Skill 已安装：{openclaw_skill_dir}")
-                click.echo("   首次在 OpenClaw 中使用时，服务器将自动在后台启动。")
+                openclaw_installed = True
         except click.Abort:
             pass
 
-    click.echo("\n🎉 全部完成！重启 Cursor / Claude Code 即可使用 NexusTrader MCP。")
+    # ── Final summary ──
+    click.echo("\n" + "─" * 50)
+    click.echo("🎉 配置完成！下一步：\n")
+    click.echo(f"  1️⃣  填写 API 凭证（如尚未填写）：")
+    click.echo(f"     {Path(project_dir) / '.keys' / '.secrets.toml'}\n")
+    click.echo(f"  2️⃣  重启 Cursor / Claude Code 即可使用 MCP（stdio 模式）。\n")
+    if openclaw_installed:
+        click.echo(f"  3️⃣  OpenClaw SSE 服务器管理命令：")
+        click.echo(f"       nexustrader-mcp start    # 启动后台服务器")
+        click.echo(f"       nexustrader-mcp status   # 查看是否在线")
+        click.echo(f"       nexustrader-mcp logs     # 查看启动日志")
+        click.echo(f"       nexustrader-mcp stop     # 停止服务器\n")
+        try:
+            if click.confirm("  现在立即启动 OpenClaw SSE 服务器？", default=True):
+                click.echo("")
+                subprocess.run(
+                    [sys.executable, "-m", "nexustrader_mcp", "start"],
+                    check=False,
+                )
+        except (click.Abort, Exception):
+            click.echo("  （跳过，稍后可运行 nexustrader-mcp start）")
 
 
 class _StderrProxy:
@@ -426,6 +547,111 @@ def serve_sse(host: str, port: int, config_path: Optional[str]):
             mcp.run(transport="sse")
     except KeyboardInterrupt:
         pass
+
+
+@main.command(name="start")
+@click.option("--no-wait", "no_wait", is_flag=True,
+              help="后台启动，不等待上线直接返回（用于 on_startup 等场景）")
+def start_daemon(no_wait: bool):
+    """后台启动 OpenClaw SSE 服务器（常驻进程，Windows/Linux/macOS 均可用）。"""
+    env = _oc_load_env()
+    mcp_port = int(env.get("NEXUSTRADER_MCP_PORT", "18765"))
+    mcp_host = env.get("NEXUSTRADER_MCP_HOST", "127.0.0.1")
+    mcp_config = env.get("NEXUSTRADER_MCP_CONFIG", "")
+
+    # Already running?
+    is_running, pid = _oc_is_running()
+    if is_running:
+        if _oc_http_ok(mcp_host, mcp_port):
+            click.echo(f"✅ NexusTrader MCP Server 已在线（PID {pid}，http://{mcp_host}:{mcp_port}/sse）")
+        else:
+            click.echo(f"◔ 进程存在（PID {pid}），引擎正在初始化，请稍候...")
+            click.echo(f"   查看进度：nexustrader-mcp logs")
+        return
+
+    # Build command: use current interpreter so packages are guaranteed available
+    cmd = [sys.executable, "-m", "nexustrader_mcp", "serve",
+           "--host", mcp_host, "--port", str(mcp_port)]
+    if mcp_config and Path(mcp_config).is_file():
+        cmd += ["--config", mcp_config]
+
+    pid = _oc_launch(cmd, _oc_log_file())
+    _oc_pid_file().parent.mkdir(parents=True, exist_ok=True)
+    _oc_pid_file().write_text(str(pid), encoding="utf-8")
+    click.echo(f"[NexusTrader MCP] 后台启动（PID {pid}）")
+    click.echo(f"  日志：{_oc_log_file()}")
+
+    if no_wait:
+        click.echo("  服务器初始化中（约 30–60 秒），用 nexustrader-mcp status 查看状态。")
+        return
+
+    # Wait with progress dots
+    click.echo("  等待引擎初始化（预计 30–60 秒）...", nl=False)
+    for _ in range(30):   # 30 × 3s = 90s max
+        time.sleep(3)
+        click.echo(".", nl=False)
+        if _oc_http_ok(mcp_host, mcp_port):
+            click.echo(f"\n✅ 服务器已上线！http://{mcp_host}:{mcp_port}/sse")
+            return
+    click.echo(f"\n⚠️  90 秒内未响应，请检查日志：nexustrader-mcp logs")
+
+
+@main.command(name="stop")
+def stop_daemon():
+    """停止后台 OpenClaw SSE 服务器。"""
+    is_running, pid = _oc_is_running()
+    if not is_running:
+        click.echo("服务器未在运行。")
+        return
+    _oc_kill(pid)
+    _oc_pid_file().unlink(missing_ok=True)
+    click.echo(f"✅ 已停止（PID {pid}）")
+
+
+@main.command(name="status")
+def daemon_status():
+    """查看 OpenClaw SSE 服务器的当前状态。"""
+    env = _oc_load_env()
+    mcp_port = int(env.get("NEXUSTRADER_MCP_PORT", "18765"))
+    mcp_host = env.get("NEXUSTRADER_MCP_HOST", "127.0.0.1")
+
+    is_running, pid = _oc_is_running()
+    http_ok = _oc_http_ok(mcp_host, mcp_port)
+
+    if is_running and http_ok:
+        click.echo(f"● 运行中  PID {pid}")
+        click.echo(f"  SSE URL : http://{mcp_host}:{mcp_port}/sse")
+        click.echo(f"  日志    : {_oc_log_file()}")
+        click.echo(f"  配置    : {env.get('NEXUSTRADER_MCP_CONFIG', '(未设置)')}")
+    elif is_running:
+        click.echo(f"◔ 启动中  PID {pid}（交易引擎初始化，约需 30–60 秒）")
+        click.echo(f"  查看进度：nexustrader-mcp logs")
+    else:
+        click.echo("○ 未运行")
+        log = _oc_log_file()
+        if log.is_file():
+            lines = log.read_text(encoding="utf-8", errors="replace").splitlines()
+            if lines:
+                click.echo("  最后几行日志：")
+                for line in lines[-4:]:
+                    click.echo(f"    {line}")
+        click.echo("  启动命令：nexustrader-mcp start")
+
+
+@main.command(name="logs")
+@click.argument("lines", default=50, type=int, required=False)
+def daemon_logs(lines: int):
+    """查看服务器日志（默认最后 50 行）。  用法：nexustrader-mcp logs [行数]"""
+    log = _oc_log_file()
+    if not log.is_file():
+        click.echo(f"日志文件不存在：{log}")
+        click.echo("服务器尚未启动，先运行：nexustrader-mcp start")
+        return
+    content = log.read_text(encoding="utf-8", errors="replace").splitlines()
+    shown = content[-lines:]
+    click.echo(f"─── {log} （最后 {len(shown)} 行）───")
+    for line in shown:
+        click.echo(line)
 
 
 # Allow `nexustrader-mcp --config xxx` as shortcut for `nexustrader-mcp run --config xxx`
