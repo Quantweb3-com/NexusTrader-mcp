@@ -263,10 +263,56 @@ def setup(config_only: bool, install_only: bool):
     click.echo("\n🎉 全部完成！重启 Cursor / Claude Code 即可使用 NexusTrader MCP。")
 
 
+class _StderrProxy:
+    """Redirect print()/write() to stderr while keeping .buffer pointing at the
+    real stdout so MCP's stdio transport (which uses sys.stdout.buffer directly)
+    continues to work correctly.
+    """
+
+    def __init__(self, real_stdout):
+        self._real = real_stdout
+        # MCP's stdio_server does: anyio.wrap_file(TextIOWrapper(sys.stdout.buffer))
+        # so .buffer must remain the real stdout binary stream.
+        self.buffer = real_stdout.buffer
+
+    def write(self, s):
+        return sys.stderr.write(s)
+
+    def writelines(self, lines):
+        return sys.stderr.writelines(lines)
+
+    def flush(self):
+        sys.stderr.flush()
+
+    def fileno(self):
+        return self._real.fileno()
+
+    @property
+    def encoding(self):
+        return self._real.encoding
+
+    @property
+    def errors(self):
+        return self._real.errors
+
+    @property
+    def closed(self):
+        return self._real.closed
+
+    def isatty(self):
+        return False
+
+
 @main.command(name="run")
 @click.option("--config", "config_path", default=None, help="配置文件路径")
 def run_server(config_path: Optional[str]):
     """启动 MCP 服务器（通常由 AI 客户端自动调用）。"""
+    # MCP uses stdio for JSON-RPC. Guard against any library printing to stdout,
+    # which would corrupt the JSON-RPC stream in strict clients like Claude Code.
+    # _StderrProxy redirects print()/write() to stderr, but keeps .buffer pointing
+    # at real stdout so MCP's stdio transport continues writing JSON there.
+    sys.stdout = _StderrProxy(sys.stdout)
+
     from nexustrader_mcp.engine_manager import EngineManager
     from nexustrader_mcp.server import create_mcp_server
 

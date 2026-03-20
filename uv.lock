@@ -1774,8 +1774,8 @@ wheels = [
 
 [[package]]
 name = "nexustrader"
-version = "0.3.9"
-source = { editable = "../NexusTrader" }
+version = "0.3.10"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiosqlite" },
     { name = "apscheduler" },
@@ -1799,41 +1799,9 @@ dependencies = [
     { name = "uvicorn" },
     { name = "uvloop", marker = "sys_platform != 'win32'" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "aiosqlite", specifier = ">=0.21.0,<0.22.0" },
-    { name = "apscheduler", specifier = ">=3.11.0,<4.0.0" },
-    { name = "asyncpg", specifier = ">=0.30.0" },
-    { name = "ccxt", specifier = ">=4.5.22" },
-    { name = "click", specifier = ">=8.1.0" },
-    { name = "curl-cffi", specifier = ">=0.13.0" },
-    { name = "dynaconf", extras = ["redis"], specifier = ">=3.2.12" },
-    { name = "eth-account", specifier = ">=0.13.7" },
-    { name = "fastapi", specifier = ">=0.117.1" },
-    { name = "msgspec", specifier = ">=0.19.0,<0.20.0" },
-    { name = "nexuslog", specifier = ">=0.4.0" },
-    { name = "numpy", specifier = ">=1.26.4,<2.2.1" },
-    { name = "picows", specifier = ">=1.10.1" },
-    { name = "psycopg2-binary", specifier = ">=2.9.10" },
-    { name = "pycryptodome", specifier = ">=3.23.0" },
-    { name = "redis", specifier = ">=5.2.1,<6.0.0" },
-    { name = "textual", specifier = ">=0.85.0" },
-    { name = "throttled-py", specifier = ">=2.2.3" },
-    { name = "typing-extensions", specifier = ">=4.12.2" },
-    { name = "uvicorn", specifier = ">=0.36.0" },
-    { name = "uvloop", marker = "sys_platform != 'win32'", specifier = ">=0.21.0" },
-    { name = "zmq", marker = "extra == 'signal'", specifier = ">=0.0.0,<0.0.1" },
-]
-provides-extras = ["signal"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "httpx", specifier = ">=0.28.0" },
-    { name = "pyinstrument", specifier = ">=5.0.1" },
-    { name = "pytest", specifier = ">=8.3.5" },
-    { name = "pytest-asyncio", specifier = ">=0.25.0" },
-    { name = "ruff", specifier = ">=0.11.10" },
+sdist = { url = "https://files.pythonhosted.org/packages/f8/98/8311ddbdff52e1b5927c33b255a6d5824e70a0f0bcc20be7c3563e6ffa48/nexustrader-0.3.10.tar.gz", hash = "sha256:2f5efafb5bf0a6b00ccd3eaf21874031e69cfd4c2fe976c35bd0fcf9517b0d6c", size = 218342, upload-time = "2026-03-20T04:35:44.798Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7a/be/cb2cd53f7d16e61fdc93636203a0190d9c9b5c69efa136716b9b3bdee44a/nexustrader-0.3.10-py3-none-any.whl", hash = "sha256:9354432ad3bcd3d31713fd0d79344163162e335b70081ad75ddc6d8a83a26e86", size = 262751, upload-time = "2026-03-20T04:35:43.037Z" },
 ]
 
 [[package]]
@@ -1853,7 +1821,7 @@ dependencies = [
 requires-dist = [
     { name = "click", specifier = ">=8.0" },
     { name = "fastmcp", specifier = ">=2.0" },
-    { name = "nexustrader", editable = "../NexusTrader" },
+    { name = "nexustrader", specifier = ">=0.3.10" },
     { name = "pandas", specifier = ">=1.5" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pyyaml", specifier = ">=6.0" },
