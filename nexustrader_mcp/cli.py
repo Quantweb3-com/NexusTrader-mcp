@@ -102,38 +102,30 @@ def _generate_mcp_json(project_dir: str, config_path: str) -> dict:
     }
 
 
-def _generate_openclaw_plugin_config(project_dir: str, config_path: str) -> dict:
-    """Generate OpenClaw MCP bridge plugin config for openclaw.json."""
+def _generate_mcp_bridge_config(project_dir: str, config_path: str) -> dict:
+    """Generate mcp-bridge config for ~/.mcp-bridge/config.json."""
     return {
-        "plugins": {
-            "entries": {
-                "openclaw-mcp-bridge": {
-                    "config": {
-                        "mode": "router",
-                        "servers": {
-                            "nexustrader": {
-                                "transport": "stdio",
-                                "command": "uv",
-                                "args": [
-                                    "--directory", project_dir,
-                                    "run", "--python", "3.11",
-                                    "nexustrader-mcp",
-                                    "--config", config_path,
-                                ],
-                                "env": {
-                                    "PYTHONPATH": "",
-                                    "PYTHONHOME": "",
-                                    "CONDA_PREFIX": "",
-                                    "CONDA_DEFAULT_ENV": "",
-                                    "CONDA_SHLVL": "0",
-                                    "UV_PYTHON_PREFERENCE": "only-managed",
-                                    "UV_PYTHON": "cpython-3.11",
-                                },
-                                "description": "NexusTrader crypto trading: balances, positions, market data, orders",
-                            },
-                        },
-                    },
+        "mode": "router",
+        "servers": {
+            "nexustrader": {
+                "transport": "stdio",
+                "command": "uv",
+                "args": [
+                    "--directory", project_dir,
+                    "run", "--python", "3.11",
+                    "nexustrader-mcp",
+                    "--config", config_path,
+                ],
+                "env": {
+                    "PYTHONPATH": "",
+                    "PYTHONHOME": "",
+                    "CONDA_PREFIX": "",
+                    "CONDA_DEFAULT_ENV": "",
+                    "CONDA_SHLVL": "0",
+                    "UV_PYTHON_PREFERENCE": "only-managed",
+                    "UV_PYTHON": "cpython-3.11",
                 },
+                "description": "NexusTrader crypto trading: balances, positions, market data, orders",
             },
         },
     }
@@ -178,8 +170,8 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return base
 
 
-def _write_openclaw_config(filepath: Path, plugin_config: dict):
-    """Merge OpenClaw MCP bridge plugin config into openclaw.json."""
+def _write_mcp_bridge_config(filepath: Path, bridge_config: dict):
+    """Merge nexustrader server into existing mcp-bridge config.json."""
     data = {}
     if filepath.is_file():
         try:
@@ -187,7 +179,7 @@ def _write_openclaw_config(filepath: Path, plugin_config: dict):
         except (json.JSONDecodeError, OSError):
             data = {}
 
-    _deep_merge(data, plugin_config)
+    _deep_merge(data, bridge_config)
     filepath.parent.mkdir(parents=True, exist_ok=True)
     filepath.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
@@ -319,15 +311,15 @@ def setup(config_only: bool, install_only: bool):
             _write_mcp_config(claude_path, server_entry)
             click.echo("✅ 已写入全局 Claude Code MCP 配置")
 
-        openclaw_path = Path.home() / ".openclaw" / "openclaw.json"
-        if click.confirm(f"\n同时写入 OpenClaw 配置 ({openclaw_path})？", default=False):
-            openclaw_plugin_config = _generate_openclaw_plugin_config(project_dir, config_path)
-            _write_openclaw_config(openclaw_path, openclaw_plugin_config)
-            click.echo("✅ 已写入 OpenClaw MCP bridge 插件配置")
+        mcp_bridge_path = Path.home() / ".mcp-bridge" / "config.json"
+        if click.confirm(f"\n同时写入 OpenClaw / mcp-bridge 配置 ({mcp_bridge_path})？", default=False):
+            bridge_config = _generate_mcp_bridge_config(project_dir, config_path)
+            _write_mcp_bridge_config(mcp_bridge_path, bridge_config)
+            click.echo("✅ 已写入 mcp-bridge 配置")
             click.echo("   后续步骤：")
             click.echo("   1. 安装插件: openclaw plugins install @aiwerk/openclaw-mcp-bridge")
             click.echo("   2. 重启网关: openclaw gateway restart")
-            click.echo("   3. 验证加载: openclaw mcp list")
+            click.echo("   3. 验证加载: openclaw plugins list")
     except click.Abort:
         pass
 

@@ -232,7 +232,7 @@ uv run nexustrader-mcp setup
 
 ## 对接 OpenClaw
 
-[OpenClaw](https://www.openclaw.ai/) 是一个开源的本地 AI 助手。OpenClaw **尚未内置** MCP 配置支持（[PR #44916](https://github.com/openclaw/openclaw/pull/44916) 进行中），目前需要通过社区插件 **[@aiwerk/openclaw-mcp-bridge](https://github.com/AIWerk/openclaw-mcp-bridge)** 来桥接 MCP Server。
+[OpenClaw](https://www.openclaw.ai/) 是一个开源的本地 AI 助手。OpenClaw 通过社区插件 **[@aiwerk/openclaw-mcp-bridge](https://github.com/AIWerk/openclaw-mcp-bridge)** 桥接 MCP Server，配置文件位于 `~/.mcp-bridge/config.json`（参见 [@aiwerk/mcp-bridge](https://github.com/AIWerk/mcp-bridge)）。
 
 ### 前置步骤：安装 MCP Bridge 插件
 
@@ -246,63 +246,55 @@ openclaw plugins install @aiwerk/openclaw-mcp-bridge
 
 ```bash
 uv run nexustrader-mcp setup
-# 向导最后会询问是否写入 OpenClaw 配置，选 Y 即可
+# 向导最后会询问是否写入 mcp-bridge 配置，选 Y 即可
 ```
 
 写入后执行：
 
 ```bash
 openclaw gateway restart
-openclaw mcp list          # 确认 nexustrader 已加载
+openclaw plugins list      # 确认 mcp-bridge 插件已激活
 ```
 
 ### 手动配置
 
-编辑 `~/.openclaw/openclaw.json`，在 `plugins.entries` 下添加 MCP bridge 配置：
+如尚未初始化，先运行 `mcp-bridge init` 创建目录。然后编辑 `~/.mcp-bridge/config.json`：
 
 ```json
 {
-  "plugins": {
-    "entries": {
-      "openclaw-mcp-bridge": {
-        "config": {
-          "mode": "router",
-          "servers": {
-            "nexustrader": {
-              "transport": "stdio",
-              "command": "uv",
-              "args": [
-                "--directory", "/path/to/NexusTrader-mcp",
-                "run", "--python", "3.11",
-                "nexustrader-mcp",
-                "--config", "/path/to/NexusTrader-mcp/config.yaml"
-              ],
-              "env": {
-                "PYTHONPATH": "",
-                "PYTHONHOME": "",
-                "CONDA_PREFIX": "",
-                "CONDA_DEFAULT_ENV": "",
-                "CONDA_SHLVL": "0",
-                "UV_PYTHON_PREFERENCE": "only-managed",
-                "UV_PYTHON": "cpython-3.11"
-              },
-              "description": "NexusTrader crypto trading"
-            }
-          }
-        }
-      }
+  "mode": "router",
+  "servers": {
+    "nexustrader": {
+      "transport": "stdio",
+      "command": "uv",
+      "args": [
+        "--directory", "/path/to/NexusTrader-mcp",
+        "run", "--python", "3.11",
+        "nexustrader-mcp",
+        "--config", "/path/to/NexusTrader-mcp/config.yaml"
+      ],
+      "env": {
+        "PYTHONPATH": "",
+        "PYTHONHOME": "",
+        "CONDA_PREFIX": "",
+        "CONDA_DEFAULT_ENV": "",
+        "CONDA_SHLVL": "0",
+        "UV_PYTHON_PREFERENCE": "only-managed",
+        "UV_PYTHON": "cpython-3.11"
+      },
+      "description": "NexusTrader crypto trading"
     }
   }
 }
 ```
 
-> 将 `/path/to/NexusTrader-mcp` 替换为实际绝对路径。`mode` 设为 `"router"` 时所有 MCP 工具通过统一入口调用，适合多 server 场景；如只有 NexusTrader 一个 server，也可改为 `"direct"`。
+> 将 `/path/to/NexusTrader-mcp` 替换为实际绝对路径。`mode` 设为 `"router"` 时所有 MCP 工具通过统一的 `mcp` meta-tool 调用（节省 token）；如只有 NexusTrader 一个 server，也可改为 `"direct"` 直接暴露所有工具。
 
 配置后重启 gateway 并验证：
 
 ```bash
 openclaw gateway restart
-openclaw mcp list          # 确认 nexustrader 已加载
+openclaw plugins list      # 确认 mcp-bridge 插件已激活
 ```
 
 之后在 OpenClaw 的任意聊天渠道（WhatsApp、Telegram、Discord 等）中即可通过自然语言访问交易数据。
@@ -472,11 +464,11 @@ AI 会调用 `create_order`，然后回复：
 
 **Q: Cursor / Claude Code / OpenClaw 里看不到 NexusTrader 工具？**
 
-1. 确认配置文件已写入（`~/.cursor/mcp.json`、`~/.claude.json` 或 `~/.openclaw/openclaw.json`）
+1. 确认配置文件已写入（`~/.cursor/mcp.json`、`~/.claude.json` 或 `~/.mcp-bridge/config.json`）
 2. 重启客户端（Cursor 重启 IDE，OpenClaw 执行 `openclaw gateway restart`）
 3. 确认 `uv` 在 PATH 中可用
 4. OpenClaw 需先安装 MCP bridge 插件：`openclaw plugins install @aiwerk/openclaw-mcp-bridge`
-5. OpenClaw 可用 `openclaw mcp list` 检查 server 是否加载
+5. OpenClaw 可用 `openclaw plugins list` 检查插件是否激活
 
 ---
 
