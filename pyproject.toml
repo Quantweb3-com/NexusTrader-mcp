@@ -5,9 +5,9 @@ description = "MCP server for NexusTrader — expose trading, market data, and a
 requires-python = ">=3.11"
 dependencies = [
     "fastmcp>=2.0",
-    "nexustrader",
     "pandas>=1.5",
     "pyyaml>=6.0",
+    "nexustrader>=0.3.10",
     "pydantic>=2.0",
     "click>=8.0",
 ]
@@ -19,5 +19,5 @@ nexustrader-mcp = "nexustrader_mcp.cli:cli_entry"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[tool.uv.sources]
-nexustrader = { path = "../NexusTrader", editable = true }
+#[tool.uv.sources]
+#nexustrader = { path = "../NexusTrader", editable = true }
