@@ -109,6 +109,18 @@ uv run nexustrader-mcp serve
 
 ---
 
+### 第四步：重启 AI 客户端
+
+服务器启动后，**重启你使用的 AI 客户端**，使其重新加载 MCP 配置并连接到服务器：
+
+- **Claude Code**：退出后重新启动
+- **OpenClaw Gateway**：在 OpenClaw 中重新加载或重启 Gateway
+- **Cursor**：重启 Cursor 编辑器
+
+> 如果客户端已在服务器启动前打开，必须重启才能识别到 NexusTrader 工具。
+
+---
+
 ## 常用命令
 
 | 命令 | 说明 |
