@@ -27,16 +27,20 @@ your-workspace/
 
 ---
 
-## 安装
+## 安装与启动
 
-### Linux
+整体流程：**setup（一次性）→ 配置凭证 → 启动服务器**
+
+### 第一步：运行配置向导
+
+#### Linux
 
 ```bash
 cd NexusTrader-mcp
 uv run nexustrader-mcp setup
 ```
 
-### Windows
+#### Windows
 
 > **必须使用普通 PowerShell 或 Windows Terminal，不要用 Anaconda Prompt。**
 > Conda 环境变量会与 uv 虚拟环境冲突导致启动失败，详见 [Anaconda 用户注意事项](#anaconda-用户注意事项)。
@@ -55,9 +59,46 @@ uv run nexustrader-mcp setup
 
 ---
 
-## 启动服务器
+### 第二步：填写 API 凭证
+
+`setup` 完成后，**必须先填写凭证，再启动服务器**。
+
+打开 `.keys/.secrets.toml`，将对应交易所的 `API_KEY` / `SECRET` 替换为真实值：
+
+```toml
+[BINANCE.DEMO]
+API_KEY = "your_binance_testnet_api_key"   # ← 替换这里
+SECRET  = "your_binance_testnet_secret"    # ← 替换这里
+```
+
+> 如果文件不存在，`setup` 会从模板自动创建；也可手动复制 `.keys/.secrets.toml.template`。
+
+---
+
+### 第三步：启动服务器
+
+#### Linux（systemd，开机自动启动）
+
+首次安装 systemd 服务（仅需运行一次）：
 
 ```bash
+bash openclaw/install.sh
+```
+
+之后用 systemctl 管理：
+
+```bash
+systemctl --user start nexustrader-mcp-sse    # 启动
+systemctl --user stop nexustrader-mcp-sse     # 停止
+systemctl --user restart nexustrader-mcp-sse  # 重启
+systemctl --user status nexustrader-mcp-sse   # 查看状态
+```
+
+服务已设置为开机自动启动（`default.target`），无需每次手动启动。
+
+#### Windows（前台运行）
+
+```powershell
 uv run nexustrader-mcp serve
 ```
 
@@ -73,10 +114,13 @@ uv run nexustrader-mcp serve
 | 命令 | 说明 |
 |------|------|
 | `uv run nexustrader-mcp setup` | 交互式配置向导，生成 config.yaml 并写入 AI 客户端（**首次必须运行**） |
-| `uv run nexustrader-mcp serve` | 启动 SSE 服务器（**每次使用前运行，保持窗口开启**） |
 | `uv run nexustrader-mcp setup --install-only` | 已有 config.yaml，仅重新写入 AI 客户端配置 |
 | `uv run nexustrader-mcp setup --config-only` | 仅重新生成 config.yaml，不写入客户端 |
+| `uv run nexustrader-mcp serve` | 启动 SSE 服务器，前台运行（**Windows 用此命令**） |
 | `uv run nexustrader-mcp serve --config path/to/config.yaml` | 指定配置文件路径启动 |
+| `bash openclaw/install.sh` | 安装 systemd user service（**Linux 首次运行**） |
+| `systemctl --user start nexustrader-mcp-sse` | 启动服务（**Linux**） |
+| `systemctl --user status nexustrader-mcp-sse` | 查看服务状态（**Linux**） |
 
 ---
 

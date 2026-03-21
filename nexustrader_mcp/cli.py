@@ -532,11 +532,27 @@ def setup(config_only: bool, install_only: bool, host: str, port: int):
     except click.Abort:
         pass
 
+    secrets_path_display = str(Path(project_dir) / ".keys" / ".secrets.toml")
+    if is_linux:
+        start_cmd = "systemctl --user start nexustrader-mcp-sse"
+        start_note = (
+            f"\n   （Linux 用户：请先运行 bash openclaw/install.sh 安装 systemd 服务，"
+            f"\n    之后每次用 systemctl --user start/stop 管理，开机自动启动）"
+        )
+    else:
+        start_cmd = "uv run nexustrader-mcp serve"
+        start_note = "\n   保持该终端窗口开启，关闭即停止服务。"
+
     click.echo(
-        f"\n🎉 配置完成！"
+        f"\n🎉 配置完成！下一步："
         f"\n"
-        f"\n   ▶ 启动服务器："
-        f"\n       uv run nexustrader-mcp serve"
+        f"\n   【第一步】填写 API 凭证："
+        f"\n       {secrets_path_display}"
+        f"\n       将各交易所的 API_KEY / SECRET 替换为真实凭证"
+        f"\n"
+        f"\n   【第二步】启动服务器："
+        f"\n       {start_cmd}"
+        f"{start_note}"
         f"\n"
         f"\n   服务器 URL: {sse_url}"
         f"\n   重启 Cursor / Claude Code 后即可使用 NexusTrader MCP。"
