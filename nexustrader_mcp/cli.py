@@ -5,10 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import subprocess
 import sys
-import time
-import urllib.request
 from pathlib import Path
 from typing import Optional
 
@@ -59,6 +56,9 @@ TESTNET_SUFFIX = {
     "hyperliquid": {"MAINNET": "TESTNET"},
 }
 
+_DEFAULT_HOST = "127.0.0.1"
+_DEFAULT_PORT = 18765
+
 
 def _pick(prompt: str, options: list[str], descriptions: list[str] | None = None) -> str:
     """Simple numbered selection (no dependency on inquirer)."""
@@ -86,6 +86,7 @@ def _multi_pick(prompt: str, options: list[str]) -> list[str]:
 
 
 def _generate_mcp_json(project_dir: str, config_path: str) -> dict:
+    """Stdio transport config (kept for reference / backward compat)."""
     return {
         "command": "uv",
         "args": [
@@ -105,6 +106,21 @@ def _generate_mcp_json(project_dir: str, config_path: str) -> dict:
     }
 
 
+def _generate_sse_entry(host: str = _DEFAULT_HOST, port: int = _DEFAULT_PORT) -> dict:
+    """SSE transport config entry for Claude Code / Cursor."""
+    return {"type": "sse", "url": f"http://{host}:{port}/sse"}
+
+
+
+def _detect_python_cmd() -> str:
+    """Return 'python3' if available, else 'python'."""
+    import subprocess as _sp
+    try:
+        _sp.run(["python3", "--version"], capture_output=True, check=True)
+        return "python3"
+    except (FileNotFoundError, _sp.CalledProcessError):
+        return "python"
+
 
 def _install_openclaw_skill(project_dir: str, skill_dir: Path, config_path: str) -> None:
     """将 OpenClaw Skill 文件安装到 ~/.openclaw/skills/nexustrader/。"""
@@ -113,10 +129,18 @@ def _install_openclaw_skill(project_dir: str, skill_dir: Path, config_path: str)
     skill_dir.mkdir(parents=True, exist_ok=True)
     (skill_dir / "logs").mkdir(exist_ok=True)
 
+    python_cmd = _detect_python_cmd()
     openclaw_src = Path(project_dir) / "openclaw"
-    for fname in ["SKILL.md", "bridge.py", "nexustrader_daemon.sh"]:
+
+    for fname in ["SKILL.md", "BOOT.md", "bridge.py", "nexustrader_daemon.sh"]:
         src = openclaw_src / fname
-        if src.is_file():
+        if not src.is_file():
+            continue
+        if fname in ("SKILL.md", "BOOT.md") and python_cmd != "python3":
+            # Replace python3 with the actually available command
+            text = src.read_text(encoding="utf-8").replace("python3", python_cmd)
+            (skill_dir / fname).write_text(text, encoding="utf-8")
+        else:
             shutil.copy2(src, skill_dir / fname)
 
     # Make daemon script executable (Linux/macOS only; silently skip on Windows)
@@ -163,6 +187,13 @@ def _install_openclaw_skill(project_dir: str, skill_dir: Path, config_path: str)
         skills.append(entry)
     index_path.write_text(json.dumps(index_data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
+    # Copy BOOT.md to ~/.openclaw/workspace/BOOT.md
+    boot_src = openclaw_src / "BOOT.md"
+    if boot_src.is_file():
+        workspace_dir = skill_dir.parent.parent / "workspace"
+        if workspace_dir.is_dir():
+            shutil.copy2(boot_src, workspace_dir / "BOOT.md")
+
 
 def _install_skills(project_dir: str, target_dir: Path) -> list[str]:
     """Copy skills/*.md to target_dir/nexustrader/, return list of installed skill names."""
@@ -193,102 +224,149 @@ def _write_mcp_config(filepath: Path, server_entry: dict):
     filepath.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
+# ── Daemon management ─────────────────────────────────────────────────────────
 
-# ──────────────────────────────────────────────────────
-# OpenClaw daemon helpers (cross-platform start/stop/status)
-# ──────────────────────────────────────────────────────
-
-def _oc_skill_dir() -> Path:
-    return Path.home() / ".openclaw" / "skills" / "nexustrader"
+def _daemon_home() -> Path:
+    return Path.home() / ".nexustrader-mcp"
 
 
-def _oc_pid_file() -> Path:
-    return _oc_skill_dir() / "logs" / "server.pid"
+def _daemon_pid_file() -> Path:
+    return _daemon_home() / "server.pid"
 
 
-def _oc_log_file() -> Path:
-    return _oc_skill_dir() / "logs" / "server.log"
+def _daemon_log_file() -> Path:
+    return _daemon_home() / "server.log"
 
 
-def _oc_load_env() -> dict:
-    """Parse ~/.openclaw/skills/nexustrader/.env into a dict."""
-    env_file = _oc_skill_dir() / ".env"
-    result: dict = {}
-    if not env_file.is_file():
-        return result
-    for line in env_file.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, val = line.partition("=")
-        result[key.strip()] = val.strip().strip("'\"")
-    return result
+def _pid_exists(pid: int) -> bool:
+    """Return True if a process with *pid* is alive.
 
-
-def _oc_is_running() -> tuple[bool, int]:
-    """Return (is_running, pid). pid=0 when not running."""
-    pid_file = _oc_pid_file()
-    if not pid_file.is_file():
-        return False, 0
-    try:
-        pid = int(pid_file.read_text(encoding="utf-8").strip())
-    except (ValueError, OSError):
-        return False, 0
-    try:
-        os.kill(pid, 0)   # signal 0: existence check only
-        return True, pid
-    except OSError:
-        return False, 0
-
-
-def _oc_http_ok(host: str, port: int) -> bool:
-    """Return True if the SSE server is responding."""
-    for path in ("/", "/sse"):
-        try:
-            with urllib.request.urlopen(
-                f"http://{host}:{port}{path}", timeout=2
-            ) as r:
-                if r.status < 500:
-                    return True
-        except Exception:
-            pass
-    return False
-
-
-def _oc_launch(cmd: list[str], log_file: Path) -> int:
-    """Start a detached background process. Returns PID."""
-    log_file.parent.mkdir(parents=True, exist_ok=True)
-    log_fh = open(log_file, "a", encoding="utf-8")  # kept open by child
-    kwargs: dict = dict(stdout=log_fh, stderr=log_fh, stdin=subprocess.DEVNULL)
+    On Windows, os.kill(pid, 0) sends CTRL_C_EVENT (signal value 0) instead of
+    doing a no-op existence check like POSIX does, so we use OpenProcess instead.
+    On POSIX, PermissionError means the process exists (we just can't signal it).
+    """
     if sys.platform == "win32":
-        kwargs["creationflags"] = (
-            subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
-        )
+        import ctypes
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if handle:
+            # Also verify the process hasn't exited yet
+            import ctypes.wintypes
+            exit_code = ctypes.wintypes.DWORD()
+            still_active = ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
+            ctypes.windll.kernel32.CloseHandle(handle)
+            # STILL_ACTIVE == 259
+            return bool(still_active and exit_code.value == 259)
+        return False
     else:
-        kwargs["start_new_session"] = True
-    proc = subprocess.Popen(cmd, **kwargs)
+        try:
+            os.kill(pid, 0)
+            return True
+        except PermissionError:
+            return True   # process exists, we just can't signal it
+        except OSError:
+            return False
+
+
+def _daemon_is_running() -> bool:
+    """Check if the daemon is running via PID file first, then port probe as fallback."""
+    import socket as _socket
+    pf = _daemon_pid_file()
+    if pf.is_file():
+        try:
+            pid = int(pf.read_text().strip())
+            if _pid_exists(pid):
+                return True
+        except ValueError:
+            pass
+        # Stale PID file — clean it up
+        try:
+            pf.unlink()
+        except OSError:
+            pass
+    # Fallback: probe the port — catches cases where PID tracking was lost
+    # (e.g. previous start via `uv run` where uv exited after exec'ing Python)
+    try:
+        with _socket.create_connection(("127.0.0.1", _DEFAULT_PORT), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
+def _venv_python(project_dir: str) -> Optional[Path]:
+    """Return the path to the venv Python if it exists, else None."""
+    if sys.platform == "win32":
+        p = Path(project_dir) / ".venv" / "Scripts" / "python.exe"
+    else:
+        p = Path(project_dir) / ".venv" / "bin" / "python"
+    return p if p.is_file() else None
+
+
+def _daemon_start_bg(project_dir: str, config_path: Optional[str], host: str, port: int) -> int:
+    """Start SSE server as a detached background process. Returns PID.
+
+    Uses .venv Python directly when available so that proc.pid is the actual
+    server process — not a uv launcher that may exit after exec'ing Python,
+    which would make PID-based status checks unreliable.
+    """
+    import subprocess as _sp
+    _daemon_home().mkdir(parents=True, exist_ok=True)
+    log_f = _daemon_log_file()
+
+    python = _venv_python(project_dir)
+    env = dict(os.environ)
+    for k in ("PYTHONPATH", "PYTHONHOME", "CONDA_PREFIX", "CONDA_DEFAULT_ENV"):
+        env.pop(k, None)
+    env["CONDA_SHLVL"] = "0"
+
+    if python is not None:
+        # Direct invocation — proc.pid == actual server PID
+        cmd = [str(python), "-m", "nexustrader_mcp.cli", "serve",
+               "--host", host, "--port", str(port)]
+    else:
+        # venv not ready yet, fall back to uv run
+        cmd = [
+            "uv", "--directory", project_dir,
+            "run", "--python", "3.11",
+            "nexustrader-mcp", "serve",
+            "--host", host, "--port", str(port),
+        ]
+        env["UV_PYTHON_PREFERENCE"] = "only-managed"
+        env["UV_PYTHON"] = "cpython-3.11"
+
+    if config_path and Path(config_path).is_file():
+        cmd += ["--config", config_path]
+
+    with open(log_f, "a") as lf:
+        if sys.platform == "win32":
+            proc = _sp.Popen(
+                cmd, stdout=lf, stderr=lf, env=env,
+                creationflags=_sp.DETACHED_PROCESS | _sp.CREATE_NEW_PROCESS_GROUP,
+                cwd=project_dir,
+            )
+        else:
+            proc = _sp.Popen(cmd, stdout=lf, stderr=lf, env=env,
+                             start_new_session=True, cwd=project_dir)
+    _daemon_pid_file().write_text(str(proc.pid))
     return proc.pid
 
 
-def _oc_kill(pid: int) -> None:
-    """Terminate a process cross-platform."""
-    if sys.platform == "win32":
-        subprocess.call(
-            ["taskkill", "/F", "/PID", str(pid)],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    else:
-        for sig in (15, 9):   # SIGTERM then SIGKILL
-            try:
-                os.kill(pid, sig)
-            except OSError:
-                break
-            time.sleep(2)
-            try:
-                os.kill(pid, 0)
-            except OSError:
-                break   # process gone
+def _daemon_stop() -> bool:
+    """Send SIGTERM to daemon. Returns True if a process was found."""
+    import signal
+    pf = _daemon_pid_file()
+    if not _daemon_is_running():
+        return False
+    try:
+        pid = int(pf.read_text().strip())
+        os.kill(pid, signal.SIGTERM)
+        try:
+            pf.unlink()
+        except OSError:
+            pass
+        return True
+    except (ValueError, OSError):
+        return False
 
 
 # ──────────────────────────────────────────────────────
@@ -304,10 +382,22 @@ def main():
 @main.command()
 @click.option("--config-only", is_flag=True, help="只生成 config.yaml，不写入客户端配置")
 @click.option("--install-only", is_flag=True, help="跳过交互，直接用已有 config.yaml 写入客户端配置")
-def setup(config_only: bool, install_only: bool):
-    """交互式配置 + 一键安装到 AI 客户端。"""
+@click.option("--host", default=_DEFAULT_HOST, show_default=True, help="SSE 服务器绑定地址")
+@click.option("--port", type=int, default=_DEFAULT_PORT, show_default=True, help="SSE 服务器端口")
+def setup(config_only: bool, install_only: bool, host: str, port: int):
+    """交互式配置 + 一键安装到 AI 客户端（SSE 模式）。"""
+    import subprocess as _sp
     project_dir = str(Path(__file__).resolve().parent.parent)
     config_path = os.path.join(project_dir, "config.yaml")
+
+    # ── Ensure venv is ready (run uv sync if .venv Python is missing) ──
+    if _venv_python(project_dir) is None:
+        click.echo("⚙️  未检测到虚拟环境，正在运行 uv sync …")
+        result = _sp.run(["uv", "sync"], cwd=project_dir)
+        if result.returncode != 0:
+            click.echo("❌ uv sync 失败，请手动运行后重试：\n   uv sync")
+            return
+        click.echo("✅ 虚拟环境初始化完成\n")
 
     if not install_only:
         click.echo("\n🚀 NexusTrader MCP 配置向导")
@@ -372,25 +462,27 @@ def setup(config_only: bool, install_only: bool):
     if config_only:
         return
 
-    # ── Install to AI clients ──
+    # ── Install to AI clients (SSE mode) ──
     if not Path(config_path).is_file():
         click.echo(f"找不到 {config_path}，请先运行 setup 生成配置。")
         return
 
-    server_entry = _generate_mcp_json(project_dir, config_path)
+    # SSE entry: clients connect to the running server via URL
+    sse_entry = _generate_sse_entry(host, port)
+    sse_url = f"http://{host}:{port}/sse"
 
-    click.echo("\n─── 安装到 AI 客户端 ───")
+    click.echo("\n─── 安装到 AI 客户端（SSE 模式）───")
+    click.echo(f"    服务器 URL: {sse_url}")
 
-    # ── Project-local configs (auto-updated, no confirmation) ──
+    is_windows = sys.platform == "win32"
+    is_linux = sys.platform.startswith("linux")
+
+    # ── Project-local Claude Code config (all platforms) ──
     project_claude_path = Path(project_dir) / ".claude" / "mcp.json"
-    _write_mcp_config(project_claude_path, server_entry)
+    _write_mcp_config(project_claude_path, sse_entry)
     click.echo(f"✅ 已更新项目本地 Claude Code 配置：{project_claude_path}")
 
-    project_cursor_path = Path(project_dir) / ".cursor" / "mcp.json"
-    _write_mcp_config(project_cursor_path, server_entry)
-    click.echo(f"✅ 已更新项目本地 Cursor 配置：{project_cursor_path}")
-
-    # ── Install Claude Code skills ──
+    # ── Install Claude Code skills (all platforms) ──
     skills_dest = Path(project_dir) / ".claude" / "commands"
     installed = _install_skills(project_dir, skills_dest)
     if installed:
@@ -406,57 +498,49 @@ def setup(config_only: bool, install_only: bool):
     elif not secrets_path.is_file():
         click.echo(f"\n⚠️  未找到 {secrets_path}，请手动创建并填入 API 凭证。")
 
-    # ── Global user configs (optional) ──
-    try:
-        cursor_path = Path.home() / ".cursor" / "mcp.json"
-        if click.confirm(f"\n同时写入全局 Cursor 配置 ({cursor_path})？", default=False):
-            _write_mcp_config(cursor_path, server_entry)
-            click.echo("✅ 已写入全局 Cursor MCP 配置")
+    # ── Windows: Cursor (global) ──
+    if is_windows:
+        try:
+            cursor_path = Path.home() / ".cursor" / "mcp.json"
+            if click.confirm(f"\n写入全局 Cursor 配置 ({cursor_path})？", default=True):
+                _write_mcp_config(cursor_path, sse_entry)
+                click.echo("✅ 已写入全局 Cursor MCP 配置")
+        except click.Abort:
+            pass
 
+    # ── Linux: OpenClaw Skill ──
+    if is_linux:
+        openclaw_src = Path(project_dir) / "openclaw"
+        if openclaw_src.is_dir():
+            openclaw_skill_dir = Path.home() / ".openclaw" / "skills" / "nexustrader"
+            try:
+                if click.confirm(
+                    f"\n安装 OpenClaw Skill ({openclaw_skill_dir})？",
+                    default=True,
+                ):
+                    _install_openclaw_skill(project_dir, openclaw_skill_dir, config_path)
+                    click.echo(f"✅ OpenClaw Skill 已安装：{openclaw_skill_dir}")
+            except click.Abort:
+                pass
+
+    # ── Global Claude Code config (optional, all platforms) ──
+    try:
         claude_path = Path.home() / ".claude.json"
-        if click.confirm(f"同时写入全局 Claude Code 配置 ({claude_path})？", default=False):
-            _write_mcp_config(claude_path, server_entry)
+        if click.confirm(f"\n同时写入全局 Claude Code 配置 ({claude_path})？", default=False):
+            _write_mcp_config(claude_path, sse_entry)
             click.echo("✅ 已写入全局 Claude Code MCP 配置")
     except click.Abort:
         pass
 
-    # ── Install OpenClaw Skill ──
-    openclaw_src = Path(project_dir) / "openclaw"
-    openclaw_installed = False
-    if openclaw_src.is_dir():
-        openclaw_skill_dir = Path.home() / ".openclaw" / "skills" / "nexustrader"
-        try:
-            if click.confirm(
-                f"\n安装 OpenClaw Skill ({openclaw_skill_dir})？",
-                default=True,
-            ):
-                _install_openclaw_skill(project_dir, openclaw_skill_dir, config_path)
-                click.echo(f"✅ OpenClaw Skill 已安装：{openclaw_skill_dir}")
-                openclaw_installed = True
-        except click.Abort:
-            pass
-
-    # ── Final summary ──
-    click.echo("\n" + "─" * 50)
-    click.echo("🎉 配置完成！下一步：\n")
-    click.echo(f"  1️⃣  填写 API 凭证（如尚未填写）：")
-    click.echo(f"     {Path(project_dir) / '.keys' / '.secrets.toml'}\n")
-    click.echo(f"  2️⃣  重启 Cursor / Claude Code 即可使用 MCP（stdio 模式）。\n")
-    if openclaw_installed:
-        click.echo(f"  3️⃣  OpenClaw SSE 服务器管理命令：")
-        click.echo(f"       nexustrader-mcp start    # 启动后台服务器")
-        click.echo(f"       nexustrader-mcp status   # 查看是否在线")
-        click.echo(f"       nexustrader-mcp logs     # 查看启动日志")
-        click.echo(f"       nexustrader-mcp stop     # 停止服务器\n")
-        try:
-            if click.confirm("  现在立即启动 OpenClaw SSE 服务器？", default=True):
-                click.echo("")
-                subprocess.run(
-                    [sys.executable, "-m", "nexustrader_mcp", "start"],
-                    check=False,
-                )
-        except (click.Abort, Exception):
-            click.echo("  （跳过，稍后可运行 nexustrader-mcp start）")
+    click.echo(
+        f"\n🎉 配置完成！"
+        f"\n"
+        f"\n   ▶ 启动服务器："
+        f"\n       uv run nexustrader-mcp serve"
+        f"\n"
+        f"\n   服务器 URL: {sse_url}"
+        f"\n   重启 Cursor / Claude Code 后即可使用 NexusTrader MCP。"
+    )
 
 
 class _StderrProxy:
@@ -527,6 +611,25 @@ def run_server(config_path: Optional[str]):
 @click.option("--config", "config_path", default=None, help="配置文件路径")
 def serve_sse(host: str, port: int, config_path: Optional[str]):
     """以 SSE (HTTP) 模式启动 MCP 服务器，供 OpenClaw 等工具使用。"""
+    import socket as _socket
+
+    # Fail fast if the port is already occupied — gives a clear error instead of
+    # a cryptic OS error buried deep in the FastMCP startup sequence.
+    # NOTE: do NOT set SO_REUSEADDR here — on Windows it allows binding to an
+    # already-occupied port, making the check a false pass.
+    with _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM) as _s:
+        try:
+            _s.bind((host, port))
+        except OSError:
+            click.echo(
+                f"[NexusTrader MCP] ❌ 端口 {port} 已被占用，无法启动。\n"
+                f"  请先停止已有实例：nexustrader-mcp daemon stop\n"
+                f"  或查看占用端口的进程（Linux）：lsof -i :{port}\n"
+                f"  Windows：netstat -ano | findstr :{port}",
+                err=True,
+            )
+            sys.exit(1)
+
     from nexustrader_mcp.engine_manager import EngineManager
     from nexustrader_mcp.server import create_mcp_server
 
@@ -549,109 +652,79 @@ def serve_sse(host: str, port: int, config_path: Optional[str]):
         pass
 
 
-@main.command(name="start")
-@click.option("--no-wait", "no_wait", is_flag=True,
-              help="后台启动，不等待上线直接返回（用于 on_startup 等场景）")
-def start_daemon(no_wait: bool):
-    """后台启动 OpenClaw SSE 服务器（常驻进程，Windows/Linux/macOS 均可用）。"""
-    env = _oc_load_env()
-    mcp_port = int(env.get("NEXUSTRADER_MCP_PORT", "18765"))
-    mcp_host = env.get("NEXUSTRADER_MCP_HOST", "127.0.0.1")
-    mcp_config = env.get("NEXUSTRADER_MCP_CONFIG", "")
+@main.command(name="daemon")
+@click.argument("action", type=click.Choice(["start", "stop", "restart", "status", "logs"]))
+@click.option("--host", default=_DEFAULT_HOST, show_default=True, help="SSE 服务器绑定地址")
+@click.option("--port", type=int, default=_DEFAULT_PORT, show_default=True, help="SSE 服务器端口")
+@click.option("--config", "config_path", default=None, help="配置文件路径")
+def daemon_cmd(action: str, host: str, port: int, config_path: Optional[str]):
+    """管理 NexusTrader MCP 后台守护进程（SSE 服务器）。
 
-    # Already running?
-    is_running, pid = _oc_is_running()
-    if is_running:
-        if _oc_http_ok(mcp_host, mcp_port):
-            click.echo(f"✅ NexusTrader MCP Server 已在线（PID {pid}，http://{mcp_host}:{mcp_port}/sse）")
-        else:
-            click.echo(f"◔ 进程存在（PID {pid}），引擎正在初始化，请稍候...")
-            click.echo(f"   查看进度：nexustrader-mcp logs")
-        return
+    \b
+    动作:
+      start    后台启动 SSE 服务器
+      stop     停止服务器
+      restart  重启服务器
+      status   查看运行状态
+      logs     实时跟踪日志（Ctrl+C 退出）
+    """
+    project_dir = str(Path(__file__).resolve().parent.parent)
+    if config_path is None:
+        default_cfg = os.path.join(project_dir, "config.yaml")
+        if Path(default_cfg).is_file():
+            config_path = default_cfg
 
-    # Build command: use current interpreter so packages are guaranteed available
-    cmd = [sys.executable, "-m", "nexustrader_mcp", "serve",
-           "--host", mcp_host, "--port", str(mcp_port)]
-    if mcp_config and Path(mcp_config).is_file():
-        cmd += ["--config", mcp_config]
-
-    pid = _oc_launch(cmd, _oc_log_file())
-    _oc_pid_file().parent.mkdir(parents=True, exist_ok=True)
-    _oc_pid_file().write_text(str(pid), encoding="utf-8")
-    click.echo(f"[NexusTrader MCP] 后台启动（PID {pid}）")
-    click.echo(f"  日志：{_oc_log_file()}")
-
-    if no_wait:
-        click.echo("  服务器初始化中（约 30–60 秒），用 nexustrader-mcp status 查看状态。")
-        return
-
-    # Wait with progress dots
-    click.echo("  等待引擎初始化（预计 30–60 秒）...", nl=False)
-    for _ in range(30):   # 30 × 3s = 90s max
-        time.sleep(3)
-        click.echo(".", nl=False)
-        if _oc_http_ok(mcp_host, mcp_port):
-            click.echo(f"\n✅ 服务器已上线！http://{mcp_host}:{mcp_port}/sse")
+    if action == "start":
+        if _daemon_is_running():
+            pf = _daemon_pid_file()
+            pid_text = pf.read_text().strip() if pf.is_file() else "未知"
+            click.echo(f"⚠️  服务器已在运行（PID {pid_text}）")
+            click.echo(f"   SSE URL: http://{host}:{port}/sse")
             return
-    click.echo(f"\n⚠️  90 秒内未响应，请检查日志：nexustrader-mcp logs")
+        pid = _daemon_start_bg(project_dir, config_path, host, port)
+        click.echo(f"✅ NexusTrader MCP 服务器已启动（PID {pid}）")
+        click.echo(f"   SSE URL: http://{host}:{port}/sse")
+        click.echo(f"   日志: {_daemon_log_file()}")
+        click.echo(f"   停止: nexustrader-mcp daemon stop")
 
+    elif action == "stop":
+        if _daemon_stop():
+            click.echo("✅ 服务器已停止")
+        else:
+            click.echo("⚠️  服务器未在运行")
 
-@main.command(name="stop")
-def stop_daemon():
-    """停止后台 OpenClaw SSE 服务器。"""
-    is_running, pid = _oc_is_running()
-    if not is_running:
-        click.echo("服务器未在运行。")
-        return
-    _oc_kill(pid)
-    _oc_pid_file().unlink(missing_ok=True)
-    click.echo(f"✅ 已停止（PID {pid}）")
+    elif action == "restart":
+        _daemon_stop()
+        import time as _time
+        _time.sleep(1)
+        pid = _daemon_start_bg(project_dir, config_path, host, port)
+        click.echo(f"✅ 服务器已重启（PID {pid}）")
+        click.echo(f"   SSE URL: http://{host}:{port}/sse")
 
+    elif action == "status":
+        if _daemon_is_running():
+            pf = _daemon_pid_file()
+            pid_text = pf.read_text().strip() if pf.is_file() else "未知"
+            click.echo(f"● NexusTrader MCP 服务器运行中（PID {pid_text}）")
+            click.echo(f"  SSE URL: http://{host}:{port}/sse")
+            click.echo(f"  日志: {_daemon_log_file()}")
+        else:
+            click.echo("○ NexusTrader MCP 服务器未运行")
+            click.echo("  启动: uv run nexustrader-mcp daemon start")
 
-@main.command(name="status")
-def daemon_status():
-    """查看 OpenClaw SSE 服务器的当前状态。"""
-    env = _oc_load_env()
-    mcp_port = int(env.get("NEXUSTRADER_MCP_PORT", "18765"))
-    mcp_host = env.get("NEXUSTRADER_MCP_HOST", "127.0.0.1")
-
-    is_running, pid = _oc_is_running()
-    http_ok = _oc_http_ok(mcp_host, mcp_port)
-
-    if is_running and http_ok:
-        click.echo(f"● 运行中  PID {pid}")
-        click.echo(f"  SSE URL : http://{mcp_host}:{mcp_port}/sse")
-        click.echo(f"  日志    : {_oc_log_file()}")
-        click.echo(f"  配置    : {env.get('NEXUSTRADER_MCP_CONFIG', '(未设置)')}")
-    elif is_running:
-        click.echo(f"◔ 启动中  PID {pid}（交易引擎初始化，约需 30–60 秒）")
-        click.echo(f"  查看进度：nexustrader-mcp logs")
-    else:
-        click.echo("○ 未运行")
-        log = _oc_log_file()
-        if log.is_file():
-            lines = log.read_text(encoding="utf-8", errors="replace").splitlines()
-            if lines:
-                click.echo("  最后几行日志：")
-                for line in lines[-4:]:
-                    click.echo(f"    {line}")
-        click.echo("  启动命令：nexustrader-mcp start")
-
-
-@main.command(name="logs")
-@click.argument("lines", default=50, type=int, required=False)
-def daemon_logs(lines: int):
-    """查看服务器日志（默认最后 50 行）。  用法：nexustrader-mcp logs [行数]"""
-    log = _oc_log_file()
-    if not log.is_file():
-        click.echo(f"日志文件不存在：{log}")
-        click.echo("服务器尚未启动，先运行：nexustrader-mcp start")
-        return
-    content = log.read_text(encoding="utf-8", errors="replace").splitlines()
-    shown = content[-lines:]
-    click.echo(f"─── {log} （最后 {len(shown)} 行）───")
-    for line in shown:
-        click.echo(line)
+    elif action == "logs":
+        import subprocess as _sp
+        log_f = _daemon_log_file()
+        if not log_f.is_file():
+            click.echo(f"日志文件不存在：{log_f}")
+            return
+        try:
+            if sys.platform == "win32":
+                _sp.run(["powershell", "-Command", f"Get-Content -Wait '{log_f}'"])
+            else:
+                _sp.run(["tail", "-f", str(log_f)])
+        except KeyboardInterrupt:
+            pass
 
 
 # Allow `nexustrader-mcp --config xxx` as shortcut for `nexustrader-mcp run --config xxx`

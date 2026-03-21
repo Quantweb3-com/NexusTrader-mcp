@@ -1,57 +1,43 @@
-# NexusTrader 量化交易助手
-
-> 连接 NexusTrader MCP Server，让 AI 实时查询加密货币账户余额、持仓、行情，并执行交易操作。
-> 支持 Binance、Bybit、OKX、Bitget、HyperLiquid。
-
+---
+name: nexustrader
+description: NexusTrader 量化交易助手 — 查询加密货币账户余额、持仓、行情，并执行交易操作。支持 Binance、Bybit、OKX、Bitget、HyperLiquid。
+metadata: {"openclaw":{"requires":{"bins":["python3"]}}}
 ---
 
-## 自动启动（on_startup）
+# NexusTrader 量化交易助手
 
-每次 OpenClaw 激活本 Skill 时，自动检查并拉起后台 MCP 服务器。
-以下命令跨平台（Windows / Linux / macOS 均可用）：
-
-```bash
-uv --directory "${NEXUSTRADER_PROJECT_DIR}" run nexustrader-mcp start --no-wait
-```
-
-- `--no-wait`：立即返回，不阻塞 OpenClaw 启动；服务器在后台继续初始化
-- 若服务器已在运行，此命令立即幂等返回，不会重复启动
-- 服务器初始化约需 30–60 秒（交易引擎连接交易所），期间工具调用会短暂等待
-
-`NEXUSTRADER_PROJECT_DIR` 由 `nexustrader-mcp setup` 写入 `${SKILL_DIR}/.env`，OpenClaw 加载 `.env` 后自动可用。
+> 通过本地命令行工具查询加密货币账户余额、持仓、行情，并执行交易操作。
+> 支持 Binance、Bybit、OKX、Bitget、HyperLiquid。
 
 ---
 
 ## 工具调用
 
-所有工具通过以下命令调用，结果自动格式化为 Markdown 表格：
+所有功能通过 exec 执行以下 shell 命令实现：
 
 ```bash
-python "${SKILL_DIR}/bridge.py" <tool_name> [--arg=value ...]
+python3 "${SKILL_DIR}/bridge.py" <tool_name> [--arg=value ...]
 ```
 
 ### 可用工具速查表
 
-| 工具名 | 用途 | 示例 |
+| 工具名 | 用途 | 完整命令示例 |
 |--------|------|------|
-| `status` | 检查服务器是否在线 | `bridge.py status` |
-| `list_tools` | 列出所有可用工具 | `bridge.py list_tools` |
-| `get_all_balances` | 所有账户余额 | `bridge.py get_all_balances` |
-| `get_balance` | 指定账户余额 | `bridge.py get_balance --exchange=binance --account_type=USD_M_FUTURE_TESTNET` |
-| `get_all_positions` | 所有持仓 | `bridge.py get_all_positions` |
-| `get_all_positions` | 指定交易所持仓 | `bridge.py get_all_positions --exchange=binance` |
-| `get_position` | 单个持仓 | `bridge.py get_position --symbol=BTCUSDT-PERP.BINANCE` |
-| `get_ticker` | 实时行情 | `bridge.py get_ticker --symbol=BTCUSDT-PERP.BINANCE` |
-| `get_klines` | K线历史 | `bridge.py get_klines --symbol=BTCUSDT-PERP.BINANCE --interval=1h --limit=24` |
-| `get_orderbook` | 买卖盘 | `bridge.py get_orderbook --symbol=BTCUSDT-PERP.BINANCE` |
-| `get_open_orders` | 当前挂单 | `bridge.py get_open_orders --exchange=binance` |
-| `get_exchange_info` | 已连接交易所 | `bridge.py get_exchange_info` |
-| `get_symbols` | 交易对列表 | `bridge.py get_symbols --exchange=binance --instrument_type=linear` |
-| `get_market_info` | 合约详情 | `bridge.py get_market_info --symbol=BTCUSDT-PERP.BINANCE` |
-| `create_order` | ⚠️ 下单 | `bridge.py create_order --symbol=BTCUSDT-PERP.BINANCE --side=BUY --order_type=MARKET --amount=0.001` |
-| `cancel_order` | ⚠️ 撤单 | `bridge.py cancel_order --symbol=BTCUSDT-PERP.BINANCE --order_id=123` |
-| `cancel_all_orders` | ⚠️ 全部撤单 | `bridge.py cancel_all_orders --symbol=BTCUSDT-PERP.BINANCE` |
-| `modify_order` | ⚠️ 改单 | `bridge.py modify_order --symbol=BTCUSDT-PERP.BINANCE --order_id=123 --price=65000` |
+| `get_all_balances` | 所有账户余额 | `python3 "${SKILL_DIR}/bridge.py" get_all_balances` |
+| `get_balance` | 指定账户余额 | `python3 "${SKILL_DIR}/bridge.py" get_balance --exchange=binance --account_type=USD_M_FUTURE_TESTNET` |
+| `get_all_positions` | 所有持仓 | `python3 "${SKILL_DIR}/bridge.py" get_all_positions` |
+| `get_position` | 单个持仓 | `python3 "${SKILL_DIR}/bridge.py" get_position --symbol=BTCUSDT-PERP.BINANCE` |
+| `get_ticker` | 实时行情 | `python3 "${SKILL_DIR}/bridge.py" get_ticker --symbol=BTCUSDT-PERP.BINANCE` |
+| `get_klines` | K线历史 | `python3 "${SKILL_DIR}/bridge.py" get_klines --symbol=BTCUSDT-PERP.BINANCE --interval=1h --limit=24` |
+| `get_orderbook` | 买卖盘 | `python3 "${SKILL_DIR}/bridge.py" get_orderbook --symbol=BTCUSDT-PERP.BINANCE` |
+| `get_open_orders` | 当前挂单 | `python3 "${SKILL_DIR}/bridge.py" get_open_orders --exchange=binance` |
+| `get_exchange_info` | 已连接交易所 | `python3 "${SKILL_DIR}/bridge.py" get_exchange_info` |
+| `get_symbols` | 交易对列表 | `python3 "${SKILL_DIR}/bridge.py" get_symbols --exchange=binance --instrument_type=linear` |
+| `get_market_info` | 合约详情 | `python3 "${SKILL_DIR}/bridge.py" get_market_info --symbol=BTCUSDT-PERP.BINANCE` |
+| `create_order` | ⚠️ 下单 | `python3 "${SKILL_DIR}/bridge.py" create_order --symbol=BTCUSDT-PERP.BINANCE --side=BUY --order_type=MARKET --amount=0.001` |
+| `cancel_order` | ⚠️ 撤单 | `python3 "${SKILL_DIR}/bridge.py" cancel_order --symbol=BTCUSDT-PERP.BINANCE --order_id=123` |
+| `cancel_all_orders` | ⚠️ 全部撤单 | `python3 "${SKILL_DIR}/bridge.py" cancel_all_orders --symbol=BTCUSDT-PERP.BINANCE` |
+| `modify_order` | ⚠️ 改单 | `python3 "${SKILL_DIR}/bridge.py" modify_order --symbol=BTCUSDT-PERP.BINANCE --order_id=123 --price=65000` |
 
 ---
 
@@ -126,35 +112,30 @@ python "${SKILL_DIR}/bridge.py" <tool_name> [--arg=value ...]
 请回复"确认"后执行，或说明修改意见。
 ```
 
-用户明确确认后，再调用 `bridge.py create_order ...`。
+用户明确确认后，再调用 `python3 "${SKILL_DIR}/bridge.py" create_order ...`。
 
 ---
 
 ### 错误处理
 
-- 工具返回 `error` 字段 → 用中文解释原因，给出解决建议
-- 服务器离线 → 提示用户（以下命令 Windows/Linux/macOS 均适用）：
+- 命令返回 `error` 字段 → 用中文解释原因，给出解决建议
+- 服务不可用 → 提示用户：
   ```
-  uv run nexustrader-mcp start
+  bash ~/.openclaw/skills/nexustrader/nexustrader_daemon.sh restart
   ```
-- API Key 无效 → 提示填写 `<项目路径>/.keys/.secrets.toml`（路径见 `${SKILL_DIR}/.env` 中的 `NEXUSTRADER_MCP_CONFIG`）
+- API Key 无效 → 提示填写 API 凭证文件，路径见 `${SKILL_DIR}/.env` 中的 `NEXUSTRADER_PROJECT_DIR`，凭证文件为该目录下的 `.keys/.secrets.toml`
 
 ---
 
 ## 故障排查
 
-以下命令 **Windows / Linux / macOS 均适用**（在项目目录下运行）：
-
 ```bash
-# 查看服务器是否在线
-uv run nexustrader-mcp status
+# 查看服务状态
+bash ~/.openclaw/skills/nexustrader/nexustrader_daemon.sh status
 
 # 查看启动日志
-uv run nexustrader-mcp logs
+bash ~/.openclaw/skills/nexustrader/nexustrader_daemon.sh logs
 
-# 重启
-uv run nexustrader-mcp stop && uv run nexustrader-mcp start
-
-# Linux/macOS 也可使用 daemon 脚本
-bash ~/.openclaw/skills/nexustrader/nexustrader_daemon.sh status
+# 重启服务
+bash ~/.openclaw/skills/nexustrader/nexustrader_daemon.sh restart
 ```
