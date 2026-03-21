@@ -352,39 +352,23 @@ def main():
     # ── Special commands ──
     if tool_name == "status":
         info = asyncio.run(_check_status(server_url))
-        if info["status"] == "online":
-            print(f"✅ NexusTrader MCP server ONLINE ({info['tools']} tools)")
-            print(f"   URL: {info['url']}")
-            sys.exit(0)
-        else:
-            print(f"❌ NexusTrader MCP server OFFLINE")
-            print(f"   URL: {info['url']}")
-            print(f"   Error: {info.get('error', 'unknown')}")
-            sys.exit(1)
+        print(json.dumps(info, ensure_ascii=False))
+        sys.exit(0 if info["status"] == "online" else 1)
 
     if tool_name == "list_tools":
         tools = asyncio.run(_list_tools(server_url))
-        print("### Available Tools\n")
-        print(_list_to_markdown_table(tools))
+        print(json.dumps({"tools": tools}, ensure_ascii=False))
         sys.exit(0)
 
     # ── Tool call ──
     try:
         raw_text = asyncio.run(_call_tool(server_url, tool_name, tool_args))
     except Exception as e:
-        print(f"❌ Failed to call `{tool_name}`: {e}", file=sys.stderr)
+        print(json.dumps({"error": str(e), "tool": tool_name}, ensure_ascii=False))
         sys.exit(1)
 
-    if raw_mode:
-        print(raw_text)
-        sys.exit(0)
-
-    # Parse and format
-    try:
-        data = json.loads(raw_text)
-        print(format_result(tool_name, data))
-    except (json.JSONDecodeError, TypeError):
-        print(raw_text)
+    # Always output raw JSON so OpenClaw AI can interpret it directly
+    print(raw_text)
 
 
 if __name__ == "__main__":

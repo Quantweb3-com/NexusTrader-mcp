@@ -2,17 +2,16 @@
 
 让 AI 直接操控你的加密货币交易账户。
 
-NexusTrader MCP 是一个 [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) 服务器，将 [NexusTrader](https://github.com/Quantweb3-com/NexusTrader) 的账户查询、实时行情和交易功能暴露给 AI 客户端。通过 **SSE (HTTP)** 传输方式在本地运行，支持 **Cursor** 和 **Claude Code**。
+NexusTrader MCP 是一个 [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) 服务器，将 [NexusTrader](https://github.com/Quantweb3-com/NexusTrader) 的账户查询、实时行情和交易功能暴露给 AI 客户端。通过 **SSE (HTTP)** 传输方式在本地运行。
 
 > **SSE 模式说明**：服务器作为后台守护进程持续运行，AI 客户端通过 HTTP URL（`http://127.0.0.1:18765/sse`）连接。这比 stdio 模式更稳定，且多个 AI 客户端可共享同一个服务器实例。
 
 ### 平台兼容性
 
-| 平台 | Cursor | Claude Code |
-|------|--------|-------------|
-| **Windows** | ✅ 支持 | ⚠️ 需手动启动服务器 |
-| **Linux** | ✅ 支持 | ✅ 支持 |
-| **macOS** | ✅ 支持 | ✅ 支持 |
+| 平台 | Claude Code | Cursor | OpenClaw |
+|------|-------------|--------|----------|
+| **Linux** | ✅ | — | ✅ |
+| **Windows** | ✅ | ✅ | — |
 
 ## 功能一览
 
@@ -65,7 +64,7 @@ uv sync
 ```
 1. uv run nexustrader-mcp setup     # 配置并安装（只需一次）
 2. nexustrader-mcp daemon start     # 每次使用前启动服务器
-3. 打开 Cursor / Claude Code        # AI 自动通过 SSE 连接
+3. 打开 Claude Code / OpenClaw      # AI 自动通过 SSE 连接
 ```
 
 > 服务器需要在 AI 客户端连接前保持运行状态。
@@ -86,7 +85,10 @@ uv run nexustrader-mcp setup
 4. 预订阅的交易对（可跳过）
 5. 确认凭证来源（默认读取 `.keys/.secrets.toml`）
 
-然后自动询问是否写入 Cursor 和 Claude Code 的配置文件（写入 SSE URL），并提供立即启动服务器的选项。
+然后根据当前平台自动写入相应客户端配置，并提供立即启动服务器的选项：
+
+- **Linux**：写入 Claude Code 项目配置 + 安装 OpenClaw Skill
+- **Windows**：写入 Claude Code 项目配置 + 询问是否写入全局 Cursor 配置
 
 ### 方式二：手动配置
 
@@ -162,13 +164,41 @@ MCP 服务器 **不需要** 你重复配置 API Key。它会自动从 NexusTrade
 
 ---
 
-## 对接 Cursor
+## 对接 Claude Code（Linux / Windows）
 
 ### 自动写入
 
 ```bash
 uv run nexustrader-mcp setup
-# 向导最后会询问是否写入 Cursor 配置，选 Y 即可
+# setup 自动写入项目本地配置 .claude/mcp.json
+# 向导结尾可选写入全局配置 ~/.claude.json
+```
+
+### 手动配置（全局）
+
+编辑 `~/.claude.json`：
+
+```json
+{
+  "mcpServers": {
+    "nexustrader": {
+      "url": "http://127.0.0.1:18765/sse"
+    }
+  }
+}
+```
+
+> **使用前必须先启动服务器**：`nexustrader-mcp daemon start`
+
+---
+
+## 对接 Cursor（Windows）
+
+### 自动写入
+
+```bash
+uv run nexustrader-mcp setup
+# Windows 下向导会询问是否写入全局 Cursor 配置，选 Y 即可
 ```
 
 ### 手动配置
@@ -191,32 +221,24 @@ uv run nexustrader-mcp setup
 
 ---
 
-## 对接 Claude Code
+## 对接 OpenClaw（Linux）
 
-### 自动写入
+### 自动安装
 
 ```bash
 uv run nexustrader-mcp setup
-# 向导最后会询问是否写入 Claude Code 配置，选 Y 即可
+# Linux 下向导会询问是否安装 OpenClaw Skill，选 Y 即可
 ```
 
-### 手动配置
+setup 会自动：
+- 将 Skill 文件安装到 `~/.openclaw/skills/nexustrader/`
+- 将 BOOT.md 复制到 `~/.openclaw/workspace/BOOT.md`（开机自检）
 
-编辑 `~/.claude.json`（用户主目录下，不是 `~/.claude/settings.json`）：
+### 手动安装
 
-```json
-{
-  "mcpServers": {
-    "nexustrader": {
-      "url": "http://127.0.0.1:18765/sse"
-    }
-  }
-}
+```bash
+uv run nexustrader-mcp setup --install-only
 ```
-
-> **使用前必须先启动服务器**：`nexustrader-mcp daemon start`
-
-重启 Claude Code 后即可使用。
 
 ---
 
@@ -392,9 +414,9 @@ AI 会调用 `create_order`，然后回复：
 3. 确认没有其他进程占用同一 API Key 的 WebSocket 连接
 4. 测试网用户确认 `account_type` 包含 `TESTNET` 或 `DEMO`
 
-**Q: Windows 下 Claude Code 无法使用？**
+**Q: Windows 下推荐使用哪个 AI 客户端？**
 
-目前 Claude Code 在 Windows 下启动 MCP 子进程存在兼容性问题，暂不支持。Windows 用户请使用 **Cursor**，或在 **WSL (Windows Subsystem for Linux)** 中运行 Claude Code。
+推荐 **Cursor** 或 **Claude Code**（均支持 SSE 模式）。OpenClaw 目前仅支持 Linux。
 
 **Q: Claude Code 中 MCP 服务器启动报错 / uv 环境冲突？**
 

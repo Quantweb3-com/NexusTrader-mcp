@@ -108,7 +108,7 @@ def _generate_mcp_json(project_dir: str, config_path: str) -> dict:
 
 def _generate_sse_entry(host: str = _DEFAULT_HOST, port: int = _DEFAULT_PORT) -> dict:
     """SSE transport config entry for Claude Code / Cursor."""
-    return {"url": f"http://{host}:{port}/sse"}
+    return {"type": "sse", "url": f"http://{host}:{port}/sse"}
 
 
 
@@ -120,7 +120,7 @@ def _install_openclaw_skill(project_dir: str, skill_dir: Path, config_path: str)
     (skill_dir / "logs").mkdir(exist_ok=True)
 
     openclaw_src = Path(project_dir) / "openclaw"
-    for fname in ["SKILL.md", "bridge.py", "nexustrader_daemon.sh"]:
+    for fname in ["SKILL.md", "BOOT.md", "bridge.py", "nexustrader_daemon.sh"]:
         src = openclaw_src / fname
         if src.is_file():
             shutil.copy2(src, skill_dir / fname)
@@ -168,6 +168,13 @@ def _install_openclaw_skill(project_dir: str, skill_dir: Path, config_path: str)
     else:
         skills.append(entry)
     index_path.write_text(json.dumps(index_data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    # Copy BOOT.md to ~/.openclaw/workspace/BOOT.md
+    boot_src = openclaw_src / "BOOT.md"
+    if boot_src.is_file():
+        workspace_dir = skill_dir.parent.parent / "workspace"
+        if workspace_dir.is_dir():
+            shutil.copy2(boot_src, workspace_dir / "BOOT.md")
 
 
 def _install_skills(project_dir: str, target_dir: Path) -> list[str]:
@@ -367,16 +374,15 @@ def setup(config_only: bool, install_only: bool, host: str, port: int):
     click.echo("\n─── 安装到 AI 客户端（SSE 模式）───")
     click.echo(f"    服务器 URL: {sse_url}")
 
-    # ── Project-local configs (auto-updated, no confirmation) ──
+    is_windows = sys.platform == "win32"
+    is_linux = sys.platform.startswith("linux")
+
+    # ── Project-local Claude Code config (all platforms) ──
     project_claude_path = Path(project_dir) / ".claude" / "mcp.json"
     _write_mcp_config(project_claude_path, sse_entry)
     click.echo(f"✅ 已更新项目本地 Claude Code 配置：{project_claude_path}")
 
-    project_cursor_path = Path(project_dir) / ".cursor" / "mcp.json"
-    _write_mcp_config(project_cursor_path, sse_entry)
-    click.echo(f"✅ 已更新项目本地 Cursor 配置：{project_cursor_path}")
-
-    # ── Install Claude Code skills ──
+    # ── Install Claude Code skills (all platforms) ──
     skills_dest = Path(project_dir) / ".claude" / "commands"
     installed = _install_skills(project_dir, skills_dest)
     if installed:
@@ -392,33 +398,39 @@ def setup(config_only: bool, install_only: bool, host: str, port: int):
     elif not secrets_path.is_file():
         click.echo(f"\n⚠️  未找到 {secrets_path}，请手动创建并填入 API 凭证。")
 
-    # ── Global user configs (optional) ──
-    try:
-        cursor_path = Path.home() / ".cursor" / "mcp.json"
-        if click.confirm(f"\n同时写入全局 Cursor 配置 ({cursor_path})？", default=False):
-            _write_mcp_config(cursor_path, sse_entry)
-            click.echo("✅ 已写入全局 Cursor MCP 配置")
+    # ── Windows: Cursor (global) ──
+    if is_windows:
+        try:
+            cursor_path = Path.home() / ".cursor" / "mcp.json"
+            if click.confirm(f"\n写入全局 Cursor 配置 ({cursor_path})？", default=True):
+                _write_mcp_config(cursor_path, sse_entry)
+                click.echo("✅ 已写入全局 Cursor MCP 配置")
+        except click.Abort:
+            pass
 
+    # ── Linux: OpenClaw Skill ──
+    if is_linux:
+        openclaw_src = Path(project_dir) / "openclaw"
+        if openclaw_src.is_dir():
+            openclaw_skill_dir = Path.home() / ".openclaw" / "skills" / "nexustrader"
+            try:
+                if click.confirm(
+                    f"\n安装 OpenClaw Skill ({openclaw_skill_dir})？",
+                    default=True,
+                ):
+                    _install_openclaw_skill(project_dir, openclaw_skill_dir, config_path)
+                    click.echo(f"✅ OpenClaw Skill 已安装：{openclaw_skill_dir}")
+            except click.Abort:
+                pass
+
+    # ── Global Claude Code config (optional, all platforms) ──
+    try:
         claude_path = Path.home() / ".claude.json"
-        if click.confirm(f"同时写入全局 Claude Code 配置 ({claude_path})？", default=False):
+        if click.confirm(f"\n同时写入全局 Claude Code 配置 ({claude_path})？", default=False):
             _write_mcp_config(claude_path, sse_entry)
             click.echo("✅ 已写入全局 Claude Code MCP 配置")
     except click.Abort:
         pass
-
-    # ── Install OpenClaw Skill ──
-    openclaw_src = Path(project_dir) / "openclaw"
-    if openclaw_src.is_dir():
-        openclaw_skill_dir = Path.home() / ".openclaw" / "skills" / "nexustrader"
-        try:
-            if click.confirm(
-                f"\n安装 OpenClaw Skill ({openclaw_skill_dir})？",
-                default=True,
-            ):
-                _install_openclaw_skill(project_dir, openclaw_skill_dir, config_path)
-                click.echo(f"✅ OpenClaw Skill 已安装：{openclaw_skill_dir}")
-        except click.Abort:
-            pass
 
     # ── Offer to start daemon now ──
     click.echo(

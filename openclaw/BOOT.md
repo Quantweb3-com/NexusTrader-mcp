@@ -5,7 +5,7 @@
 ## 步骤 1 — 检查 SSE 服务器是否在线
 
 ```bash
-python ~/.openclaw/skills/nexustrader/bridge.py status
+python3 ~/.openclaw/skills/nexustrader/bridge.py status
 ```
 
 ## 步骤 2 — 如果离线，启动守护进程
