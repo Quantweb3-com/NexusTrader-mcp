@@ -56,6 +56,9 @@ TESTNET_SUFFIX = {
     "hyperliquid": {"MAINNET": "TESTNET"},
 }
 
+_DEFAULT_HOST = "127.0.0.1"
+_DEFAULT_PORT = 18765
+
 
 def _pick(prompt: str, options: list[str], descriptions: list[str] | None = None) -> str:
     """Simple numbered selection (no dependency on inquirer)."""
@@ -83,6 +86,7 @@ def _multi_pick(prompt: str, options: list[str]) -> list[str]:
 
 
 def _generate_mcp_json(project_dir: str, config_path: str) -> dict:
+    """Stdio transport config (kept for reference / backward compat)."""
     return {
         "command": "uv",
         "args": [
@@ -100,6 +104,11 @@ def _generate_mcp_json(project_dir: str, config_path: str) -> dict:
             "UV_PYTHON": "cpython-3.11",
         },
     }
+
+
+def _generate_sse_entry(host: str = _DEFAULT_HOST, port: int = _DEFAULT_PORT) -> dict:
+    """SSE transport config entry for Claude Code / Cursor."""
+    return {"url": f"http://{host}:{port}/sse"}
 
 
 
@@ -190,6 +199,78 @@ def _write_mcp_config(filepath: Path, server_entry: dict):
     filepath.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
+# ── Daemon management ─────────────────────────────────────────────────────────
+
+def _daemon_home() -> Path:
+    return Path.home() / ".nexustrader-mcp"
+
+
+def _daemon_pid_file() -> Path:
+    return _daemon_home() / "server.pid"
+
+
+def _daemon_log_file() -> Path:
+    return _daemon_home() / "server.log"
+
+
+def _daemon_is_running() -> bool:
+    pf = _daemon_pid_file()
+    if not pf.is_file():
+        return False
+    try:
+        pid = int(pf.read_text().strip())
+        os.kill(pid, 0)
+        return True
+    except (ValueError, OSError):
+        try:
+            pf.unlink()
+        except OSError:
+            pass
+        return False
+
+
+def _daemon_start_bg(project_dir: str, config_path: Optional[str], host: str, port: int) -> int:
+    """Start SSE server as a detached background process. Returns PID."""
+    import subprocess as _sp
+    _daemon_home().mkdir(parents=True, exist_ok=True)
+    log_f = _daemon_log_file()
+    cmd = [
+        "uv", "--directory", project_dir,
+        "run", "--python", "3.11",
+        "nexustrader-mcp", "serve",
+        "--host", host, "--port", str(port),
+    ]
+    if config_path and Path(config_path).is_file():
+        cmd += ["--config", config_path]
+    env = dict(os.environ)
+    for k in ("PYTHONPATH", "PYTHONHOME", "CONDA_PREFIX", "CONDA_DEFAULT_ENV"):
+        env[k] = ""
+    env["CONDA_SHLVL"] = "0"
+    env["UV_PYTHON_PREFERENCE"] = "only-managed"
+    env["UV_PYTHON"] = "cpython-3.11"
+    with open(log_f, "a") as lf:
+        proc = _sp.Popen(cmd, stdout=lf, stderr=lf, env=env, start_new_session=True)
+    _daemon_pid_file().write_text(str(proc.pid))
+    return proc.pid
+
+
+def _daemon_stop() -> bool:
+    """Send SIGTERM to daemon. Returns True if a process was found."""
+    import signal
+    pf = _daemon_pid_file()
+    if not _daemon_is_running():
+        return False
+    try:
+        pid = int(pf.read_text().strip())
+        os.kill(pid, signal.SIGTERM)
+        try:
+            pf.unlink()
+        except OSError:
+            pass
+        return True
+    except (ValueError, OSError):
+        return False
+
 
 # ──────────────────────────────────────────────────────
 # CLI commands
@@ -204,8 +285,10 @@ def main():
 @main.command()
 @click.option("--config-only", is_flag=True, help="只生成 config.yaml，不写入客户端配置")
 @click.option("--install-only", is_flag=True, help="跳过交互，直接用已有 config.yaml 写入客户端配置")
-def setup(config_only: bool, install_only: bool):
-    """交互式配置 + 一键安装到 AI 客户端。"""
+@click.option("--host", default=_DEFAULT_HOST, show_default=True, help="SSE 服务器绑定地址")
+@click.option("--port", type=int, default=_DEFAULT_PORT, show_default=True, help="SSE 服务器端口")
+def setup(config_only: bool, install_only: bool, host: str, port: int):
+    """交互式配置 + 一键安装到 AI 客户端（SSE 模式）。"""
     project_dir = str(Path(__file__).resolve().parent.parent)
     config_path = os.path.join(project_dir, "config.yaml")
 
@@ -272,22 +355,25 @@ def setup(config_only: bool, install_only: bool):
     if config_only:
         return
 
-    # ── Install to AI clients ──
+    # ── Install to AI clients (SSE mode) ──
     if not Path(config_path).is_file():
         click.echo(f"找不到 {config_path}，请先运行 setup 生成配置。")
         return
 
-    server_entry = _generate_mcp_json(project_dir, config_path)
+    # SSE entry: clients connect to the running server via URL
+    sse_entry = _generate_sse_entry(host, port)
+    sse_url = f"http://{host}:{port}/sse"
 
-    click.echo("\n─── 安装到 AI 客户端 ───")
+    click.echo("\n─── 安装到 AI 客户端（SSE 模式）───")
+    click.echo(f"    服务器 URL: {sse_url}")
 
     # ── Project-local configs (auto-updated, no confirmation) ──
     project_claude_path = Path(project_dir) / ".claude" / "mcp.json"
-    _write_mcp_config(project_claude_path, server_entry)
+    _write_mcp_config(project_claude_path, sse_entry)
     click.echo(f"✅ 已更新项目本地 Claude Code 配置：{project_claude_path}")
 
     project_cursor_path = Path(project_dir) / ".cursor" / "mcp.json"
-    _write_mcp_config(project_cursor_path, server_entry)
+    _write_mcp_config(project_cursor_path, sse_entry)
     click.echo(f"✅ 已更新项目本地 Cursor 配置：{project_cursor_path}")
 
     # ── Install Claude Code skills ──
@@ -310,12 +396,12 @@ def setup(config_only: bool, install_only: bool):
     try:
         cursor_path = Path.home() / ".cursor" / "mcp.json"
         if click.confirm(f"\n同时写入全局 Cursor 配置 ({cursor_path})？", default=False):
-            _write_mcp_config(cursor_path, server_entry)
+            _write_mcp_config(cursor_path, sse_entry)
             click.echo("✅ 已写入全局 Cursor MCP 配置")
 
         claude_path = Path.home() / ".claude.json"
         if click.confirm(f"同时写入全局 Claude Code 配置 ({claude_path})？", default=False):
-            _write_mcp_config(claude_path, server_entry)
+            _write_mcp_config(claude_path, sse_entry)
             click.echo("✅ 已写入全局 Claude Code MCP 配置")
     except click.Abort:
         pass
@@ -331,11 +417,33 @@ def setup(config_only: bool, install_only: bool):
             ):
                 _install_openclaw_skill(project_dir, openclaw_skill_dir, config_path)
                 click.echo(f"✅ OpenClaw Skill 已安装：{openclaw_skill_dir}")
-                click.echo("   首次在 OpenClaw 中使用时，服务器将自动在后台启动。")
         except click.Abort:
             pass
 
-    click.echo("\n🎉 全部完成！重启 Cursor / Claude Code 即可使用 NexusTrader MCP。")
+    # ── Offer to start daemon now ──
+    click.echo(
+        f"\n⚠️  SSE 模式需要服务器在后台持续运行。"
+        f"\n   Claude Code / Cursor 连接时服务器必须已启动。"
+    )
+    try:
+        if click.confirm("\n现在启动 SSE 服务器？", default=True):
+            if _daemon_is_running():
+                click.echo("⚠️  服务器已在运行，无需重新启动。")
+            else:
+                pid = _daemon_start_bg(project_dir, config_path, host, port)
+                click.echo(f"✅ 服务器已在后台启动（PID {pid}）")
+                click.echo(f"   日志: {_daemon_log_file()}")
+        else:
+            click.echo(f"   手动启动: uv run nexustrader-mcp daemon start")
+    except click.Abort:
+        pass
+
+    click.echo(
+        f"\n🎉 全部完成！"
+        f"\n   服务器 URL: {sse_url}"
+        f"\n   管理服务器: nexustrader-mcp daemon start/stop/status"
+        f"\n   重启 Cursor / Claude Code 后即可使用 NexusTrader MCP。"
+    )
 
 
 class _StderrProxy:
@@ -426,6 +534,76 @@ def serve_sse(host: str, port: int, config_path: Optional[str]):
             mcp.run(transport="sse")
     except KeyboardInterrupt:
         pass
+
+
+@main.command(name="daemon")
+@click.argument("action", type=click.Choice(["start", "stop", "restart", "status", "logs"]))
+@click.option("--host", default=_DEFAULT_HOST, show_default=True, help="SSE 服务器绑定地址")
+@click.option("--port", type=int, default=_DEFAULT_PORT, show_default=True, help="SSE 服务器端口")
+@click.option("--config", "config_path", default=None, help="配置文件路径")
+def daemon_cmd(action: str, host: str, port: int, config_path: Optional[str]):
+    """管理 NexusTrader MCP 后台守护进程（SSE 服务器）。
+
+    \b
+    动作:
+      start    后台启动 SSE 服务器
+      stop     停止服务器
+      restart  重启服务器
+      status   查看运行状态
+      logs     实时跟踪日志（Ctrl+C 退出）
+    """
+    project_dir = str(Path(__file__).resolve().parent.parent)
+    if config_path is None:
+        default_cfg = os.path.join(project_dir, "config.yaml")
+        if Path(default_cfg).is_file():
+            config_path = default_cfg
+
+    if action == "start":
+        if _daemon_is_running():
+            pid_text = _daemon_pid_file().read_text().strip()
+            click.echo(f"⚠️  服务器已在运行（PID {pid_text}）")
+            click.echo(f"   SSE URL: http://{host}:{port}/sse")
+            return
+        pid = _daemon_start_bg(project_dir, config_path, host, port)
+        click.echo(f"✅ NexusTrader MCP 服务器已启动（PID {pid}）")
+        click.echo(f"   SSE URL: http://{host}:{port}/sse")
+        click.echo(f"   日志: {_daemon_log_file()}")
+        click.echo(f"   停止: nexustrader-mcp daemon stop")
+
+    elif action == "stop":
+        if _daemon_stop():
+            click.echo("✅ 服务器已停止")
+        else:
+            click.echo("⚠️  服务器未在运行")
+
+    elif action == "restart":
+        _daemon_stop()
+        import time as _time
+        _time.sleep(1)
+        pid = _daemon_start_bg(project_dir, config_path, host, port)
+        click.echo(f"✅ 服务器已重启（PID {pid}）")
+        click.echo(f"   SSE URL: http://{host}:{port}/sse")
+
+    elif action == "status":
+        if _daemon_is_running():
+            pid_text = _daemon_pid_file().read_text().strip()
+            click.echo(f"● NexusTrader MCP 服务器运行中（PID {pid_text}）")
+            click.echo(f"  SSE URL: http://{host}:{port}/sse")
+            click.echo(f"  日志: {_daemon_log_file()}")
+        else:
+            click.echo("○ NexusTrader MCP 服务器未运行")
+            click.echo("  启动: nexustrader-mcp daemon start")
+
+    elif action == "logs":
+        import subprocess as _sp
+        log_f = _daemon_log_file()
+        if not log_f.is_file():
+            click.echo(f"日志文件不存在：{log_f}")
+            return
+        try:
+            _sp.run(["tail", "-f", str(log_f)])
+        except KeyboardInterrupt:
+            pass
 
 
 # Allow `nexustrader-mcp --config xxx` as shortcut for `nexustrader-mcp run --config xxx`

@@ -36,8 +36,10 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import subprocess
 import sys
 import textwrap
+import time
 from pathlib import Path
 
 def _load_skill_env() -> None:
@@ -124,18 +126,96 @@ def format_result(tool_name: str, data) -> str:
     return f"### {tool_name}\n\n{data}"
 
 
+# ── Daemon Auto-Start ────────────────────────────────────────────────
+
+_DAEMON_SH = Path(__file__).resolve().parent / "nexustrader_daemon.sh"
+_AUTOSTART_TIMEOUT = 90  # seconds to wait for daemon after auto-start
+
+
+def _daemon_start() -> bool:
+    """Attempt to start the daemon in the background. Returns True if command succeeded."""
+    if not _DAEMON_SH.is_file():
+        return False
+    result = subprocess.run(
+        ["bash", str(_DAEMON_SH), "start"],
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0
+
+
+async def _wait_for_server(server_url: str, timeout: int = _AUTOSTART_TIMEOUT) -> bool:
+    """Poll until server is reachable or timeout expires. Returns True if online."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        info = await _check_status_raw(server_url)
+        if info["status"] == "online":
+            return True
+        await asyncio.sleep(3)
+    return False
+
+
+async def _check_status_raw(server_url: str) -> dict:
+    """Low-level status check — does not attempt auto-start."""
+    from fastmcp import Client
+
+    try:
+        async with Client(server_url) as client:
+            tools = await client.list_tools()
+        return {"status": "online", "tools": len(tools), "url": server_url}
+    except Exception as e:
+        return {"status": "offline", "error": str(e), "url": server_url}
+
+
+async def _ensure_server(server_url: str) -> None:
+    """Ensure server is online, auto-starting daemon if needed.
+
+    Raises RuntimeError if server cannot be brought online.
+    """
+    info = await _check_status_raw(server_url)
+    if info["status"] == "online":
+        return
+
+    print(
+        "⚠️  NexusTrader MCP server offline — attempting auto-start...",
+        file=sys.stderr,
+    )
+    started = _daemon_start()
+    if not started:
+        raise RuntimeError(
+            f"Failed to start daemon ({_DAEMON_SH}). "
+            "Run: bash ~/.openclaw/skills/nexustrader/nexustrader_daemon.sh start"
+        )
+
+    print(
+        f"⏳ Waiting for server to initialize (up to {_AUTOSTART_TIMEOUT}s)...",
+        file=sys.stderr,
+    )
+    online = await _wait_for_server(server_url, timeout=_AUTOSTART_TIMEOUT)
+    if not online:
+        raise RuntimeError(
+            "Server did not come online within timeout. "
+            "Check logs: bash ~/.openclaw/skills/nexustrader/nexustrader_daemon.sh logs"
+        )
+    print("✅ Server is now online.", file=sys.stderr)
+
+
 # ── MCP Client Operations ────────────────────────────────────────────
 
 
 async def _call_tool(server_url: str, tool_name: str, arguments: dict) -> str:
-    """Connect to MCP server and call a tool, return raw text result."""
+    """Connect to MCP server and call a tool, auto-starting daemon if offline."""
     from fastmcp import Client
+
+    await _ensure_server(server_url)
 
     async with Client(server_url) as client:
         result = await client.call_tool(tool_name, arguments)
 
+    # fastmcp ≥ 2.x returns CallToolResult(content=[...])
+    content = result.content if hasattr(result, "content") else result
     parts = []
-    for item in result:
+    for item in content:
         if hasattr(item, "text"):
             parts.append(item.text)
         else:
@@ -144,8 +224,10 @@ async def _call_tool(server_url: str, tool_name: str, arguments: dict) -> str:
 
 
 async def _list_tools(server_url: str) -> list[dict]:
-    """List all available tools from the MCP server."""
+    """List all available tools from the MCP server, auto-starting daemon if offline."""
     from fastmcp import Client
+
+    await _ensure_server(server_url)
 
     async with Client(server_url) as client:
         tools = await client.list_tools()
@@ -160,15 +242,8 @@ async def _list_tools(server_url: str) -> list[dict]:
 
 
 async def _check_status(server_url: str) -> dict:
-    """Check if the MCP server is reachable and return tool count."""
-    from fastmcp import Client
-
-    try:
-        async with Client(server_url) as client:
-            tools = await client.list_tools()
-        return {"status": "online", "tools": len(tools), "url": server_url}
-    except Exception as e:
-        return {"status": "offline", "error": str(e), "url": server_url}
+    """Check server status (no auto-start — status command is for diagnostics)."""
+    return await _check_status_raw(server_url)
 
 
 # ── CLI Argument Parser ──────────────────────────────────────────────

@@ -2,17 +2,17 @@
 
 让 AI 直接操控你的加密货币交易账户。
 
-NexusTrader MCP 是一个 [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) 服务器，将 [NexusTrader](https://github.com/Quantweb3-com/NexusTrader) 的账户查询、实时行情和交易功能暴露给 AI 客户端。通过 **stdio** 传输方式在本地运行，支持 **Cursor** 和 **Claude Code**。
+NexusTrader MCP 是一个 [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) 服务器，将 [NexusTrader](https://github.com/Quantweb3-com/NexusTrader) 的账户查询、实时行情和交易功能暴露给 AI 客户端。通过 **SSE (HTTP)** 传输方式在本地运行，支持 **Cursor** 和 **Claude Code**。
+
+> **SSE 模式说明**：服务器作为后台守护进程持续运行，AI 客户端通过 HTTP URL（`http://127.0.0.1:18765/sse`）连接。这比 stdio 模式更稳定，且多个 AI 客户端可共享同一个服务器实例。
 
 ### 平台兼容性
 
 | 平台 | Cursor | Claude Code |
 |------|--------|-------------|
-| **Windows** | ✅ 支持 | ❌ 暂不支持 |
+| **Windows** | ✅ 支持 | ⚠️ 需手动启动服务器 |
 | **Linux** | ✅ 支持 | ✅ 支持 |
 | **macOS** | ✅ 支持 | ✅ 支持 |
-
-> **Windows 用户注意**：Claude Code 在 Windows 下启动 MCP 子进程时存在兼容性问题，建议使用 Cursor 或 WSL 环境下的 Claude Code。
 
 ## 功能一览
 
@@ -60,6 +60,16 @@ uv sync
 
 ## 快速开始
 
+### 使用流程概览
+
+```
+1. uv run nexustrader-mcp setup     # 配置并安装（只需一次）
+2. nexustrader-mcp daemon start     # 每次使用前启动服务器
+3. 打开 Cursor / Claude Code        # AI 自动通过 SSE 连接
+```
+
+> 服务器需要在 AI 客户端连接前保持运行状态。
+
 ### 方式一：一键配置（推荐）
 
 运行交互式向导，生成配置文件并自动写入 AI 客户端：
@@ -76,7 +86,7 @@ uv run nexustrader-mcp setup
 4. 预订阅的交易对（可跳过）
 5. 确认凭证来源（默认读取 `.keys/.secrets.toml`）
 
-然后自动询问是否写入 Cursor 和 Claude Code 的配置文件。确认后重启客户端即可使用。
+然后自动询问是否写入 Cursor 和 Claude Code 的配置文件（写入 SSE URL），并提供立即启动服务器的选项。
 
 ### 方式二：手动配置
 
@@ -119,7 +129,17 @@ exchanges:
       - bookl1
 ```
 
-#### 2. 配置 AI 客户端（见下方章节）
+#### 2. 启动 SSE 服务器
+
+```bash
+# 后台启动（推荐）
+nexustrader-mcp daemon start
+
+# 或前台运行（调试用）
+uv run nexustrader-mcp serve --config config.yaml
+```
+
+#### 3. 配置 AI 客户端（见下方章节）
 
 ---
 
@@ -159,36 +179,19 @@ uv run nexustrader-mcp setup
 {
   "mcpServers": {
     "nexustrader": {
-      "command": "uv",
-      "args": [
-        "--directory", "/path/to/NexusTrader-mcp",
-        "run", "--python", "3.11",
-        "nexustrader-mcp",
-        "--config", "/path/to/NexusTrader-mcp/config.yaml"
-      ],
-      "env": {
-        "PYTHONPATH": "",
-        "PYTHONHOME": "",
-        "CONDA_PREFIX": "",
-        "CONDA_DEFAULT_ENV": "",
-        "CONDA_SHLVL": "0",
-        "UV_PYTHON_PREFERENCE": "only-managed",
-        "UV_PYTHON": "cpython-3.11"
-      }
+      "url": "http://127.0.0.1:18765/sse"
     }
   }
 }
 ```
 
-> 将 `/path/to/NexusTrader-mcp` 替换为本项目的实际绝对路径。`env` 部分用于隔离 Anaconda 等外部 Python 环境的干扰。
+> **使用前必须先启动服务器**：`nexustrader-mcp daemon start`
 
 重启 Cursor 后，在 Agent 模式下即可使用 NexusTrader 工具。
 
 ---
 
 ## 对接 Claude Code
-
-> ⚠️ **仅支持 Linux / macOS**。Windows 下的 Claude Code 暂不支持，建议 Windows 用户使用 Cursor 或在 WSL 中运行 Claude Code。
 
 ### 自动写入
 
@@ -199,32 +202,19 @@ uv run nexustrader-mcp setup
 
 ### 手动配置
 
-编辑 `~/.claude.json`（注意：是用户主目录下的 `.claude.json`，不是 `~/.claude/settings.json`）：
+编辑 `~/.claude.json`（用户主目录下，不是 `~/.claude/settings.json`）：
 
 ```json
 {
   "mcpServers": {
     "nexustrader": {
-      "command": "uv",
-      "args": [
-        "--directory", "/path/to/NexusTrader-mcp",
-        "run", "--python", "3.11",
-        "nexustrader-mcp",
-        "--config", "/path/to/NexusTrader-mcp/config.yaml"
-      ],
-      "env": {
-        "PYTHONPATH": "",
-        "PYTHONHOME": "",
-        "CONDA_PREFIX": "",
-        "CONDA_DEFAULT_ENV": "",
-        "CONDA_SHLVL": "0",
-        "UV_PYTHON_PREFERENCE": "only-managed",
-        "UV_PYTHON": "cpython-3.11"
-      }
+      "url": "http://127.0.0.1:18765/sse"
     }
   }
 }
 ```
+
+> **使用前必须先启动服务器**：`nexustrader-mcp daemon start`
 
 重启 Claude Code 后即可使用。
 
@@ -316,7 +306,7 @@ NexusTrader 使用统一的交易对格式：
 ## CLI 参考
 
 ```bash
-# 交互式配置 + 写入 AI 客户端
+# 交互式配置 + 写入 AI 客户端（SSE 模式）
 uv run nexustrader-mcp setup
 
 # 只生成 config.yaml，不写入客户端
@@ -325,14 +315,33 @@ uv run nexustrader-mcp setup --config-only
 # 已有 config.yaml，只写入客户端配置
 uv run nexustrader-mcp setup --install-only
 
-# 启动 MCP 服务器（通常由 AI 客户端自动调用）
-uv run nexustrader-mcp run
+# ── 守护进程管理 ──
 
-# 指定配置文件启动
+# 后台启动 SSE 服务器
+nexustrader-mcp daemon start
+
+# 停止服务器
+nexustrader-mcp daemon stop
+
+# 重启服务器
+nexustrader-mcp daemon restart
+
+# 查看运行状态
+nexustrader-mcp daemon status
+
+# 实时查看日志（Ctrl+C 退出）
+nexustrader-mcp daemon logs
+
+# ── 前台运行（调试用）──
+
+# 前台 SSE 模式（日志直接输出到终端）
+uv run nexustrader-mcp serve --config path/to/config.yaml
+
+# 前台 stdio 模式（供调试，AI 客户端一般不直接调用此命令）
 uv run nexustrader-mcp run --config path/to/config.yaml
 
 # 使用 MCP Inspector 调试
-npx @modelcontextprotocol/inspector uv run nexustrader-mcp
+npx @modelcontextprotocol/inspector uv run nexustrader-mcp serve
 ```
 
 ---
@@ -393,9 +402,10 @@ AI 会调用 `create_order`，然后回复：
 
 **Q: Cursor / Claude Code 里看不到 NexusTrader 工具？**
 
-1. 确认配置文件已写入（`~/.cursor/mcp.json` 或 `~/.claude.json`）
-2. 重启客户端（Cursor 重启 IDE，Claude Code 重启终端）
-3. 确认 `uv` 在 PATH 中可用
+1. 确认服务器正在运行：`nexustrader-mcp daemon status`
+2. 如果未运行，先启动：`nexustrader-mcp daemon start`
+3. 确认配置文件已写入 SSE URL（`~/.cursor/mcp.json` 或 `~/.claude.json`），内容应为 `{"url": "http://127.0.0.1:18765/sse"}`
+4. 重启客户端（Cursor 重启 IDE，Claude Code 重启终端）
 
 ---
 
