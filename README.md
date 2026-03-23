@@ -2,12 +2,12 @@
 
 让 AI 直接操控你的加密货币交易账户。
 
-NexusTrader MCP 是一个 [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) 服务器，将 [NexusTrader](https://github.com/Quantweb3-com/NexusTrader) 的账户查询、实时行情和交易功能暴露给 AI 客户端，通过 SSE (HTTP) 在本地运行。
+NexusTrader MCP 是一个 [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) 服务器，将 [NexusTrader](https://github.com/Quantweb3-com/NexusTrader) 的账户查询、实时行情和交易功能暴露给 AI 客户端，在本地运行并同时提供 SSE 与 Streamable HTTP 两种接入方式。
 
-| 平台 | Claude Code | Cursor | OpenClaw |
-|------|:-----------:|:------:|:--------:|
-| Linux | ✅ | — | ✅ |
-| Windows | ✅ | ✅ | — |
+| 平台 | Claude Code | Cursor | Codex | OpenClaw |
+|------|:-----------:|:------:|:-----:|:--------:|
+| Linux | ✅ | — | ✅ | ✅ |
+| Windows | ✅ | ✅ | ✅ | — |
 
 支持交易所：**Binance** / **Bybit** / **OKX** / **Bitget** / **HyperLiquid**
 
@@ -52,10 +52,12 @@ uv run nexustrader-mcp setup
 
 `setup` 会自动检测虚拟环境，首次运行时自动执行 `uv sync` 安装所有依赖，无需手动操作。
 
-向导会依次询问：交易所、账户类型、是否测试网、预订阅交易对，然后自动写入 AI 客户端配置：
+向导会依次询问：交易所、账户类型、是否测试网、预订阅交易对；随后会分别询问是否安装各 AI 客户端配置：
 
-- **Linux**：写入 Claude Code 项目配置 + 安装 OpenClaw Skill
-- **Windows**：写入 Claude Code 项目配置 + 询问是否写入 Cursor 全局配置
+- **Claude Code**：写入项目内 `.claude/mcp.json`，并安装 `.claude/commands/nexustrader/` 技能
+- **Codex**：写入用户级 `~/.codex/config.toml`
+- **Cursor（Windows）**：写入用户级 `~/.cursor/mcp.json`
+- **OpenClaw（Linux）**：安装 OpenClaw Skill
 
 ---
 
@@ -105,7 +107,10 @@ uv run nexustrader-mcp serve
 > **保持该终端窗口开启。** 服务器在前台运行，关闭窗口即停止服务，AI 将断开连接。
 > 如需同时执行其他命令，请另开一个终端窗口。
 
-服务器启动后监听 `http://127.0.0.1:18765/sse`，所有已配置的 AI 客户端会自动连接。
+服务器启动后会同时提供两个端点：
+
+- `http://127.0.0.1:18765/sse`：供 **Claude Code / Cursor / OpenClaw**
+- `http://127.0.0.1:18765/mcp`：供 **Codex**
 
 ---
 
@@ -116,6 +121,7 @@ uv run nexustrader-mcp serve
 - **Claude Code**：退出后重新启动
 - **OpenClaw Gateway**：在 OpenClaw 中重新加载或重启 Gateway
 - **Cursor**：重启 Cursor 编辑器
+- **Codex**：重启 Codex
 
 > 如果客户端已在服务器启动前打开，必须重启才能识别到 NexusTrader 工具。
 
@@ -125,10 +131,10 @@ uv run nexustrader-mcp serve
 
 | 命令 | 说明 |
 |------|------|
-| `uv run nexustrader-mcp setup` | 交互式配置向导，生成 config.yaml 并写入 AI 客户端（**首次必须运行**） |
-| `uv run nexustrader-mcp setup --install-only` | 已有 config.yaml，仅重新写入 AI 客户端配置 |
+| `uv run nexustrader-mcp setup` | 交互式配置向导，生成 `config.yaml` 并按提示安装 Claude / Codex / Cursor / OpenClaw 配置（**首次必须运行**） |
+| `uv run nexustrader-mcp setup --install-only` | 已有 `config.yaml`，仅重新安装 AI 客户端配置 |
 | `uv run nexustrader-mcp setup --config-only` | 仅重新生成 config.yaml，不写入客户端 |
-| `uv run nexustrader-mcp serve` | 启动 SSE 服务器，前台运行（**Windows 用此命令**） |
+| `uv run nexustrader-mcp serve` | 启动 HTTP MCP 服务器，前台运行，同时提供 `/sse` 与 `/mcp` |
 | `uv run nexustrader-mcp serve --config path/to/config.yaml` | 指定配置文件路径启动 |
 | `bash openclaw/install.sh` | 安装 systemd user service（**Linux 首次运行**） |
 | `systemctl --user start nexustrader-mcp-sse` | 启动服务（**Linux**） |
@@ -150,7 +156,7 @@ uv run nexustrader-mcp serve
 
 ## AI 使用示例
 
-配置完成、服务器运行后，在 Cursor 或 Claude Code 中直接用自然语言操作，无需记住工具名。
+配置完成、服务器运行后，在 Cursor、Claude Code 或 Codex 中直接用自然语言操作，无需记住工具名。
 
 <details>
 <summary>查看完整示例（19 个场景）</summary>
@@ -318,7 +324,7 @@ exchanges:
 ## 安全注意事项
 
 - API 密钥仅在本地读取，不会记录到日志或返回给 AI
-- SSE 服务器默认绑定 `127.0.0.1`，只有本机可访问
+- HTTP MCP 服务器默认绑定 `127.0.0.1`，只有本机可访问
 - 交易工具执行**真实交易**，请确认 AI 的操作后再继续
 - 建议先用**测试网**验证功能
 
@@ -337,7 +343,9 @@ exchanges:
 **Q: AI 客户端里看不到 NexusTrader 工具？**
 
 1. 确认 `serve` 终端窗口未关闭
-2. 确认 AI 客户端配置了 SSE URL `http://127.0.0.1:18765/sse`（运行 `setup` 可自动写入）
+2. 确认 AI 客户端配置了正确的本地 URL（运行 `setup` 可自动写入）：
+   - Claude Code / Cursor / OpenClaw：`http://127.0.0.1:18765/sse`
+   - Codex：`http://127.0.0.1:18765/mcp`
 3. 重启 AI 客户端
 
 **Q: 重新换了交易所或账户类型，如何更新客户端配置？**

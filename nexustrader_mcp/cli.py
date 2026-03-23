@@ -1,4 +1,4 @@
-"""CLI 入口：setup / run。"""
+"""CLI 入口：setup / run / serve。"""
 
 from __future__ import annotations
 
@@ -224,73 +224,127 @@ def _write_mcp_config(filepath: Path, server_entry: dict):
     filepath.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
-# ── Daemon management ─────────────────────────────────────────────────────────
+def _write_codex_config(filepath: Path, source_path: Path, sse_url: str):
+    """Merge nexustrader into Codex TOML config while preserving other sections."""
+    source_lines = source_path.read_text(encoding="utf-8").splitlines()
+    rendered_lines = []
+    for line in source_lines:
+        if line.strip().startswith("url = "):
+            rendered_lines.append(f'url = "{sse_url}"')
+        else:
+            rendered_lines.append(line)
 
-def _daemon_home() -> Path:
-    return Path.home() / ".nexustrader-mcp"
+    block_lines = rendered_lines
+    header = "[mcp_servers.nexustrader]"
+    filepath.parent.mkdir(parents=True, exist_ok=True)
 
+    if not filepath.is_file():
+        filepath.write_text("\n".join(block_lines).rstrip() + "\n", encoding="utf-8")
+        return
 
-def _daemon_pid_file() -> Path:
-    return _daemon_home() / "server.pid"
+    existing_lines = filepath.read_text(encoding="utf-8").splitlines()
+    start_idx = next((i for i, line in enumerate(existing_lines) if line.strip() == header), None)
 
-
-def _daemon_log_file() -> Path:
-    return _daemon_home() / "server.log"
-
-
-def _pid_exists(pid: int) -> bool:
-    """Return True if a process with *pid* is alive.
-
-    On Windows, os.kill(pid, 0) sends CTRL_C_EVENT (signal value 0) instead of
-    doing a no-op existence check like POSIX does, so we use OpenProcess instead.
-    On POSIX, PermissionError means the process exists (we just can't signal it).
-    """
-    if sys.platform == "win32":
-        import ctypes
-        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-        handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-        if handle:
-            # Also verify the process hasn't exited yet
-            import ctypes.wintypes
-            exit_code = ctypes.wintypes.DWORD()
-            still_active = ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
-            ctypes.windll.kernel32.CloseHandle(handle)
-            # STILL_ACTIVE == 259
-            return bool(still_active and exit_code.value == 259)
-        return False
+    if start_idx is None:
+        merged_lines = existing_lines[:]
+        if merged_lines and merged_lines[-1].strip():
+            merged_lines.append("")
+        merged_lines.extend(block_lines)
     else:
-        try:
-            os.kill(pid, 0)
-            return True
-        except PermissionError:
-            return True   # process exists, we just can't signal it
-        except OSError:
-            return False
+        end_idx = len(existing_lines)
+        for i in range(start_idx + 1, len(existing_lines)):
+            stripped = existing_lines[i].strip()
+            if stripped.startswith("[") and stripped.endswith("]"):
+                end_idx = i
+                break
+        merged_lines = existing_lines[:start_idx] + block_lines + existing_lines[end_idx:]
+
+    filepath.write_text("\n".join(merged_lines).rstrip() + "\n", encoding="utf-8")
 
 
-def _daemon_is_running() -> bool:
-    """Check if the daemon is running via PID file first, then port probe as fallback."""
-    import socket as _socket
-    pf = _daemon_pid_file()
-    if pf.is_file():
-        try:
-            pid = int(pf.read_text().strip())
-            if _pid_exists(pid):
-                return True
-        except ValueError:
-            pass
-        # Stale PID file — clean it up
-        try:
-            pf.unlink()
-        except OSError:
-            pass
-    # Fallback: probe the port — catches cases where PID tracking was lost
-    # (e.g. previous start via `uv run` where uv exited after exec'ing Python)
-    try:
-        with _socket.create_connection(("127.0.0.1", _DEFAULT_PORT), timeout=1):
-            return True
-    except OSError:
-        return False
+def _create_dual_http_app(mcp):
+    """Expose legacy SSE and streamable HTTP together for client compatibility."""
+    from contextlib import asynccontextmanager
+
+    from fastmcp.server.context import reset_transport, set_transport
+    from fastmcp.server.http import StreamableHTTPASGIApp, set_http_request
+    from mcp.server.sse import SseServerTransport
+    from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+    from starlette.applications import Starlette
+    from starlette.middleware import Middleware
+    from starlette.requests import Request
+    from starlette.responses import Response
+    from starlette.routing import Mount, Route
+
+    sse_path = "/sse"
+    message_path = "/messages/"
+    streamable_http_path = "/mcp"
+
+    class _PathAwareRequestContextMiddleware:
+        def __init__(self, app):
+            self.app = app
+
+        async def __call__(self, scope, receive, send):
+            if scope["type"] != "http":
+                await self.app(scope, receive, send)
+                return
+
+            path = scope.get("path", "")
+            if path.startswith(streamable_http_path):
+                transport_type = "streamable-http"
+            else:
+                transport_type = "sse"
+
+            token = set_transport(transport_type)
+            try:
+                with set_http_request(Request(scope)):
+                    await self.app(scope, receive, send)
+            finally:
+                reset_transport(token)
+
+    sse = SseServerTransport(message_path)
+
+    async def handle_sse(scope, receive, send):
+        async with sse.connect_sse(scope, receive, send) as streams:
+            await mcp._mcp_server.run(
+                streams[0],
+                streams[1],
+                mcp._mcp_server.create_initialization_options(),
+            )
+        return Response()
+
+    async def sse_endpoint(request: Request) -> Response:
+        return await handle_sse(request.scope, request.receive, request._send)
+
+    session_manager = StreamableHTTPSessionManager(
+        app=mcp._mcp_server,
+        event_store=None,
+        retry_interval=None,
+        json_response=False,
+        # Codex uses Streamable HTTP and may not retain MCP session IDs between
+        # requests, so expose `/mcp` in stateless mode for compatibility.
+        stateless=True,
+    )
+    streamable_http_app = StreamableHTTPASGIApp(session_manager)
+
+    @asynccontextmanager
+    async def lifespan(app):
+        async with mcp._lifespan_manager(), session_manager.run():
+            yield
+
+    routes = [
+        Route(sse_path, endpoint=sse_endpoint, methods=["GET"]),
+        Mount(message_path, app=sse.handle_post_message),
+        Route(streamable_http_path, endpoint=streamable_http_app),
+    ]
+
+    app = Starlette(
+        routes=routes,
+        middleware=[Middleware(_PathAwareRequestContextMiddleware)],
+        lifespan=lifespan,
+    )
+    app.state.fastmcp_server = mcp
+    return app
 
 
 def _venv_python(project_dir: str) -> Optional[Path]:
@@ -300,74 +354,6 @@ def _venv_python(project_dir: str) -> Optional[Path]:
     else:
         p = Path(project_dir) / ".venv" / "bin" / "python"
     return p if p.is_file() else None
-
-
-def _daemon_start_bg(project_dir: str, config_path: Optional[str], host: str, port: int) -> int:
-    """Start SSE server as a detached background process. Returns PID.
-
-    Uses .venv Python directly when available so that proc.pid is the actual
-    server process — not a uv launcher that may exit after exec'ing Python,
-    which would make PID-based status checks unreliable.
-    """
-    import subprocess as _sp
-    _daemon_home().mkdir(parents=True, exist_ok=True)
-    log_f = _daemon_log_file()
-
-    python = _venv_python(project_dir)
-    env = dict(os.environ)
-    for k in ("PYTHONPATH", "PYTHONHOME", "CONDA_PREFIX", "CONDA_DEFAULT_ENV"):
-        env.pop(k, None)
-    env["CONDA_SHLVL"] = "0"
-
-    if python is not None:
-        # Direct invocation — proc.pid == actual server PID
-        cmd = [str(python), "-m", "nexustrader_mcp.cli", "serve",
-               "--host", host, "--port", str(port)]
-    else:
-        # venv not ready yet, fall back to uv run
-        cmd = [
-            "uv", "--directory", project_dir,
-            "run", "--python", "3.11",
-            "nexustrader-mcp", "serve",
-            "--host", host, "--port", str(port),
-        ]
-        env["UV_PYTHON_PREFERENCE"] = "only-managed"
-        env["UV_PYTHON"] = "cpython-3.11"
-
-    if config_path and Path(config_path).is_file():
-        cmd += ["--config", config_path]
-
-    with open(log_f, "a") as lf:
-        if sys.platform == "win32":
-            proc = _sp.Popen(
-                cmd, stdout=lf, stderr=lf, env=env,
-                creationflags=_sp.DETACHED_PROCESS | _sp.CREATE_NEW_PROCESS_GROUP,
-                cwd=project_dir,
-            )
-        else:
-            proc = _sp.Popen(cmd, stdout=lf, stderr=lf, env=env,
-                             start_new_session=True, cwd=project_dir)
-    _daemon_pid_file().write_text(str(proc.pid))
-    return proc.pid
-
-
-def _daemon_stop() -> bool:
-    """Send SIGTERM to daemon. Returns True if a process was found."""
-    import signal
-    pf = _daemon_pid_file()
-    if not _daemon_is_running():
-        return False
-    try:
-        pid = int(pf.read_text().strip())
-        os.kill(pid, signal.SIGTERM)
-        try:
-            pf.unlink()
-        except OSError:
-            pass
-        return True
-    except (ValueError, OSError):
-        return False
-
 
 # ──────────────────────────────────────────────────────
 # CLI commands
@@ -470,6 +456,7 @@ def setup(config_only: bool, install_only: bool, host: str, port: int):
     # SSE entry: clients connect to the running server via URL
     sse_entry = _generate_sse_entry(host, port)
     sse_url = f"http://{host}:{port}/sse"
+    codex_url = f"http://{host}:{port}/mcp"
 
     click.echo("\n─── 安装到 AI 客户端（SSE 模式）───")
     click.echo(f"    服务器 URL: {sse_url}")
@@ -477,16 +464,30 @@ def setup(config_only: bool, install_only: bool, host: str, port: int):
     is_windows = sys.platform == "win32"
     is_linux = sys.platform.startswith("linux")
 
-    # ── Project-local Claude Code config (all platforms) ──
+    # ── Claude Code config and skills (all platforms) ──
     project_claude_path = Path(project_dir) / ".claude" / "mcp.json"
-    _write_mcp_config(project_claude_path, sse_entry)
-    click.echo(f"✅ 已更新项目本地 Claude Code 配置：{project_claude_path}")
-
-    # ── Install Claude Code skills (all platforms) ──
     skills_dest = Path(project_dir) / ".claude" / "commands"
-    installed = _install_skills(project_dir, skills_dest)
-    if installed:
-        click.echo(f"✅ 已安装 {len(installed)} 个 Claude Code 技能：" + ", ".join(f"/{s}" for s in installed))
+    try:
+        if click.confirm(f"\n安装 Claude Code 配置 ({project_claude_path}) 和技能？", default=True):
+            _write_mcp_config(project_claude_path, sse_entry)
+            click.echo(f"✅ 已更新 Claude Code 配置：{project_claude_path}")
+
+            installed = _install_skills(project_dir, skills_dest)
+            if installed:
+                click.echo(f"✅ 已安装 {len(installed)} 个 Claude Code 技能：" + ", ".join(f"/{s}" for s in installed))
+    except click.Abort:
+        pass
+
+    # ── Codex config (all platforms) ──
+    codex_template = Path(project_dir) / ".codex" / "config.toml"
+    if codex_template.is_file():
+        try:
+            codex_path = Path.home() / ".codex" / "config.toml"
+            if click.confirm(f"\n写入全局 Codex 配置 ({codex_path})？", default=True):
+                _write_codex_config(codex_path, codex_template, codex_url)
+                click.echo("✅ 已写入全局 Codex 配置")
+        except click.Abort:
+            pass
 
     # ── Bootstrap .secrets.toml from template ──
     secrets_path = Path(project_dir) / ".keys" / ".secrets.toml"
@@ -523,15 +524,6 @@ def setup(config_only: bool, install_only: bool, host: str, port: int):
             except click.Abort:
                 pass
 
-    # ── Global Claude Code config (optional, all platforms) ──
-    try:
-        claude_path = Path.home() / ".claude.json"
-        if click.confirm(f"\n同时写入全局 Claude Code 配置 ({claude_path})？", default=False):
-            _write_mcp_config(claude_path, sse_entry)
-            click.echo("✅ 已写入全局 Claude Code MCP 配置")
-    except click.Abort:
-        pass
-
     secrets_path_display = str(Path(project_dir) / ".keys" / ".secrets.toml")
     if is_linux:
         start_cmd = "systemctl --user start nexustrader-mcp-sse"
@@ -554,8 +546,9 @@ def setup(config_only: bool, install_only: bool, host: str, port: int):
         f"\n       {start_cmd}"
         f"{start_note}"
         f"\n"
-        f"\n   服务器 URL: {sse_url}"
-        f"\n   重启 Cursor / Claude Code 后即可使用 NexusTrader MCP。"
+        f"\n   SSE URL: {sse_url}"
+        f"\n   Codex URL: {codex_url}"
+        f"\n   重启 Cursor / Claude Code / Codex 后即可使用 NexusTrader MCP。"
     )
 
 
@@ -626,7 +619,14 @@ def run_server(config_path: Optional[str]):
 @click.option("--port", type=int, default=18765, show_default=True, help="监听端口")
 @click.option("--config", "config_path", default=None, help="配置文件路径")
 def serve_sse(host: str, port: int, config_path: Optional[str]):
-    """以 SSE (HTTP) 模式启动 MCP 服务器，供 OpenClaw 等工具使用。"""
+    """启动 HTTP MCP 服务器，同时提供 `/sse` 和 `/mcp`。"""
+    if sys.platform == "win32":
+        import asyncio as _asyncio
+
+        # Avoid noisy Proactor transport reset tracebacks when local MCP clients
+        # probe endpoints and close the connection immediately on Windows.
+        _asyncio.set_event_loop_policy(_asyncio.WindowsSelectorEventLoopPolicy())
+
     import socket as _socket
 
     # Fail fast if the port is already occupied — gives a clear error instead of
@@ -639,7 +639,7 @@ def serve_sse(host: str, port: int, config_path: Optional[str]):
         except OSError:
             click.echo(
                 f"[NexusTrader MCP] ❌ 端口 {port} 已被占用，无法启动。\n"
-                f"  请先停止已有实例：nexustrader-mcp daemon stop\n"
+                f"  请先停止已有的 `serve` / systemd 服务实例\n"
                 f"  或查看占用端口的进程（Linux）：lsof -i :{port}\n"
                 f"  Windows：netstat -ano | findstr :{port}",
                 err=True,
@@ -653,12 +653,26 @@ def serve_sse(host: str, port: int, config_path: Optional[str]):
     mcp = create_mcp_server(engine, config_path=config_path)
 
     click.echo(
-        f"[NexusTrader MCP] SSE server listening on http://{host}:{port}",
+        f"[NexusTrader MCP] HTTP server listening on http://{host}:{port} "
+        f"(SSE: /sse, Codex: /mcp)",
         err=True,
     )
     try:
         try:
-            mcp.run(transport="sse", host=host, port=port)
+            from uvicorn import Config, Server
+
+            app = _create_dual_http_app(mcp)
+            config = Config(
+                app,
+                host=host,
+                port=port,
+                log_level="info",
+                timeout_graceful_shutdown=0,
+                lifespan="on",
+                ws="websockets-sansio",
+            )
+            server = Server(config)
+            server.run()
         except TypeError:
             # Fallback for older FastMCP versions
             os.environ.setdefault("HOST", host)
@@ -666,81 +680,6 @@ def serve_sse(host: str, port: int, config_path: Optional[str]):
             mcp.run(transport="sse")
     except KeyboardInterrupt:
         pass
-
-
-@main.command(name="daemon")
-@click.argument("action", type=click.Choice(["start", "stop", "restart", "status", "logs"]))
-@click.option("--host", default=_DEFAULT_HOST, show_default=True, help="SSE 服务器绑定地址")
-@click.option("--port", type=int, default=_DEFAULT_PORT, show_default=True, help="SSE 服务器端口")
-@click.option("--config", "config_path", default=None, help="配置文件路径")
-def daemon_cmd(action: str, host: str, port: int, config_path: Optional[str]):
-    """管理 NexusTrader MCP 后台守护进程（SSE 服务器）。
-
-    \b
-    动作:
-      start    后台启动 SSE 服务器
-      stop     停止服务器
-      restart  重启服务器
-      status   查看运行状态
-      logs     实时跟踪日志（Ctrl+C 退出）
-    """
-    project_dir = str(Path(__file__).resolve().parent.parent)
-    if config_path is None:
-        default_cfg = os.path.join(project_dir, "config.yaml")
-        if Path(default_cfg).is_file():
-            config_path = default_cfg
-
-    if action == "start":
-        if _daemon_is_running():
-            pf = _daemon_pid_file()
-            pid_text = pf.read_text().strip() if pf.is_file() else "未知"
-            click.echo(f"⚠️  服务器已在运行（PID {pid_text}）")
-            click.echo(f"   SSE URL: http://{host}:{port}/sse")
-            return
-        pid = _daemon_start_bg(project_dir, config_path, host, port)
-        click.echo(f"✅ NexusTrader MCP 服务器已启动（PID {pid}）")
-        click.echo(f"   SSE URL: http://{host}:{port}/sse")
-        click.echo(f"   日志: {_daemon_log_file()}")
-        click.echo(f"   停止: nexustrader-mcp daemon stop")
-
-    elif action == "stop":
-        if _daemon_stop():
-            click.echo("✅ 服务器已停止")
-        else:
-            click.echo("⚠️  服务器未在运行")
-
-    elif action == "restart":
-        _daemon_stop()
-        import time as _time
-        _time.sleep(1)
-        pid = _daemon_start_bg(project_dir, config_path, host, port)
-        click.echo(f"✅ 服务器已重启（PID {pid}）")
-        click.echo(f"   SSE URL: http://{host}:{port}/sse")
-
-    elif action == "status":
-        if _daemon_is_running():
-            pf = _daemon_pid_file()
-            pid_text = pf.read_text().strip() if pf.is_file() else "未知"
-            click.echo(f"● NexusTrader MCP 服务器运行中（PID {pid_text}）")
-            click.echo(f"  SSE URL: http://{host}:{port}/sse")
-            click.echo(f"  日志: {_daemon_log_file()}")
-        else:
-            click.echo("○ NexusTrader MCP 服务器未运行")
-            click.echo("  启动: uv run nexustrader-mcp daemon start")
-
-    elif action == "logs":
-        import subprocess as _sp
-        log_f = _daemon_log_file()
-        if not log_f.is_file():
-            click.echo(f"日志文件不存在：{log_f}")
-            return
-        try:
-            if sys.platform == "win32":
-                _sp.run(["powershell", "-Command", f"Get-Content -Wait '{log_f}'"])
-            else:
-                _sp.run(["tail", "-f", str(log_f)])
-        except KeyboardInterrupt:
-            pass
 
 
 # Allow `nexustrader-mcp --config xxx` as shortcut for `nexustrader-mcp run --config xxx`
