@@ -181,10 +181,11 @@ async def _ensure_server(server_url: str) -> None:
         file=sys.stderr,
     )
     started = _daemon_start()
+    _proj = os.environ.get("NEXUSTRADER_PROJECT_DIR", "~/NexusTrader-mcp")
     if not started:
         raise RuntimeError(
-            f"Failed to start daemon ({_DAEMON_SH}). "
-            "Run: bash ~/.openclaw/skills/nexustrader/nexustrader_daemon.sh start"
+            "NexusTrader MCP 服务器启动失败。请手动运行：\n"
+            f"  uv --directory {_proj} run nexustrader-mcp start"
         )
 
     print(
@@ -194,8 +195,8 @@ async def _ensure_server(server_url: str) -> None:
     online = await _wait_for_server(server_url, timeout=_AUTOSTART_TIMEOUT)
     if not online:
         raise RuntimeError(
-            "Server did not come online within timeout. "
-            "Check logs: bash ~/.openclaw/skills/nexustrader/nexustrader_daemon.sh logs"
+            "服务器未在超时时间内上线。查看日志：\n"
+            f"  uv --directory {_proj} run nexustrader-mcp logs"
         )
     print("✅ Server is now online.", file=sys.stderr)
 

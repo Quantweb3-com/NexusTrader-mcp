@@ -1,33 +1,34 @@
-# NexusTrader MCP 启动检查
+# NexusTrader MCP 状态检查
 
-每次 OpenClaw gateway 启动时，请静默执行以下步骤（**不要向用户发送任何消息**，除非检测到错误）：
+每次 OpenClaw gateway 启动时，执行以下**只读状态检查**（不自动启动任何进程）：
 
-## 步骤 1 — 检查 SSE 服务器是否在线
+## 步骤 — 检查 SSE 服务器是否在线
 
 ```bash
 python3 ~/.openclaw/skills/nexustrader/bridge.py status
 ```
 
-## 步骤 2 — 如果离线，启动守护进程
+## 如果返回 ONLINE
 
-如果 status 返回 OFFLINE，执行：
+正常，无需任何操作。
 
-```bash
-bash ~/.openclaw/skills/nexustrader/nexustrader_daemon.sh start
-```
+## 如果返回 OFFLINE
 
-守护进程启动需要 30–90 秒完成交易引擎初始化，请耐心等待脚本返回。
+**告知用户**（不要静默启动进程）：
 
-## 步骤 3 — 验证
-
-再次运行 `bridge.py status`，若仍为 OFFLINE，在日志中记录错误但**不要打断用户**：
-
-```bash
-bash ~/.openclaw/skills/nexustrader/nexustrader_daemon.sh logs 20
-```
+> ⚠️ **NexusTrader MCP 服务器当前未运行。**
+>
+> 请在终端中手动启动（约需 30–60 秒初始化）：
+>
+> ```bash
+> uv run nexustrader-mcp start
+> ```
+>
+> 启动后重新发送您的请求即可。
 
 ## 注意事项
 
-- 若 systemd 服务 `nexustrader-mcp-sse.service` 已托管此进程（推荐），步骤 1 通常直接返回 ONLINE，步骤 2 会被跳过。
+- 本检查仅读取服务器状态，**不执行任何写操作，不启动任何后台进程**
+- 服务器由用户手动启动和停止，OpenClaw 不会自动管理其生命周期
 - SKILL_DIR = `~/.openclaw/skills/nexustrader`
-- SSE URL = `http://127.0.0.1:18765/sse`
+- SSE URL   = `http://127.0.0.1:18765/sse`

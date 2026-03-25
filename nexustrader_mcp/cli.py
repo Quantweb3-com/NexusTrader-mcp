@@ -187,12 +187,20 @@ def _install_openclaw_skill(project_dir: str, skill_dir: Path, config_path: str)
         skills.append(entry)
     index_path.write_text(json.dumps(index_data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
-    # Copy BOOT.md to ~/.openclaw/workspace/BOOT.md
+    # Append BOOT.md fragment to ~/.openclaw/workspace/BOOT.md (idempotent)
     boot_src = openclaw_src / "BOOT.md"
     if boot_src.is_file():
         workspace_dir = skill_dir.parent.parent / "workspace"
-        if workspace_dir.is_dir():
-            shutil.copy2(boot_src, workspace_dir / "BOOT.md")
+        workspace_dir.mkdir(parents=True, exist_ok=True)
+        boot_dst = workspace_dir / "BOOT.md"
+        marker = "# NexusTrader MCP 状态检查"
+        fragment = boot_src.read_text(encoding="utf-8")
+        if boot_dst.is_file():
+            existing = boot_dst.read_text(encoding="utf-8")
+            if marker not in existing:
+                boot_dst.write_text(existing.rstrip() + "\n\n" + fragment, encoding="utf-8")
+        else:
+            boot_dst.write_text(fragment, encoding="utf-8")
 
 
 def _install_skills(project_dir: str, target_dir: Path) -> list[str]:
@@ -354,6 +362,68 @@ def _venv_python(project_dir: str) -> Optional[Path]:
     else:
         p = Path(project_dir) / ".venv" / "bin" / "python"
     return p if p.is_file() else None
+
+
+# ──────────────────────────────────────────────────────
+# Background-server process helpers (start / stop / status / logs)
+# ──────────────────────────────────────────────────────
+
+def _get_log_dir() -> Path:
+    """Return the log/PID directory (env override → ~/.nexustrader-mcp/logs)."""
+    env_dir = os.environ.get("NEXUSTRADER_LOG_DIR")
+    if env_dir:
+        return Path(env_dir)
+    return Path.home() / ".nexustrader-mcp" / "logs"
+
+
+def _pid_file() -> Path:
+    return _get_log_dir() / "server.pid"
+
+
+def _log_file() -> Path:
+    return _get_log_dir() / "server.log"
+
+
+def _read_pid() -> Optional[int]:
+    p = _pid_file()
+    if p.is_file():
+        try:
+            return int(p.read_text().strip())
+        except (ValueError, OSError):
+            pass
+    return None
+
+
+def _is_process_alive(pid: int) -> bool:
+    """Return True if pid is an active process."""
+    if sys.platform == "win32":
+        import subprocess as _sp
+        r = _sp.run(
+            f'tasklist /FI "PID eq {pid}" /NH',
+            shell=True, capture_output=True, text=True,
+        )
+        return str(pid) in r.stdout
+    else:
+        try:
+            os.kill(pid, 0)
+            return True
+        except (ProcessLookupError, PermissionError, OSError):
+            return False
+
+
+def _build_serve_cmd(project_dir: str, host: str, port: int, config_path: Optional[str]) -> list:
+    """Return the command list that runs `nexustrader-mcp serve` as a subprocess."""
+    python = _venv_python(project_dir)
+    base = (
+        [str(python), "-m", "nexustrader_mcp", "serve"]
+        if python
+        else ["uv", "--directory", project_dir, "run", "nexustrader-mcp", "serve"]
+    )
+    cmd = base + ["--host", host, "--port", str(port)]
+    if config_path:
+        cmd += ["--config", config_path]
+    return cmd
+
 
 # ──────────────────────────────────────────────────────
 # CLI commands
@@ -525,15 +595,13 @@ def setup(config_only: bool, install_only: bool, host: str, port: int):
                 pass
 
     secrets_path_display = str(Path(project_dir) / ".keys" / ".secrets.toml")
-    if is_linux:
-        start_cmd = "systemctl --user start nexustrader-mcp-sse"
-        start_note = (
-            f"\n   （Linux 用户：请先运行 bash openclaw/install.sh 安装 systemd 服务，"
-            f"\n    之后每次用 systemctl --user start/stop 管理，开机自动启动）"
-        )
-    else:
-        start_cmd = "uv run nexustrader-mcp serve"
-        start_note = "\n   保持该终端窗口开启，关闭即停止服务。"
+    start_cmd = "uv run nexustrader-mcp start"
+    start_note = (
+        f"\n   服务器在后台运行，关闭终端后仍继续。"
+        f"\n   停止：uv run nexustrader-mcp stop"
+        f"\n   状态：uv run nexustrader-mcp status"
+        f"\n   日志：uv run nexustrader-mcp logs"
+    )
 
     click.echo(
         f"\n🎉 配置完成！下一步："
@@ -592,6 +660,161 @@ class _StderrProxy:
         return False
 
 
+@main.command(name="start")
+@click.option("--host", default=_DEFAULT_HOST, show_default=True, help="绑定地址")
+@click.option("--port", type=int, default=_DEFAULT_PORT, show_default=True, help="监听端口")
+@click.option("--config", "config_path", default=None, help="配置文件路径（默认自动查找 config.yaml）")
+@click.option("--no-wait", is_flag=True, help="启动后不等待服务器上线")
+def start_server(host: str, port: int, config_path: Optional[str], no_wait: bool):
+    """后台启动 MCP 服务器（写入 PID 文件，可用 stop 停止）。"""
+    import subprocess as _sp
+    import time as _time
+
+    # Check if already running
+    pid = _read_pid()
+    if pid and _is_process_alive(pid):
+        click.echo(f"[NexusTrader MCP] ✅ 服务器已在运行（PID {pid}），无需重复启动。")
+        click.echo(f"   状态：uv run nexustrader-mcp status")
+        return
+
+    project_dir = str(Path(__file__).resolve().parent.parent)
+    if config_path is None:
+        env_cfg = os.environ.get("NEXUSTRADER_MCP_CONFIG")
+        config_path = env_cfg if env_cfg else os.path.join(project_dir, "config.yaml")
+
+    log_dir = _get_log_dir()
+    log_dir.mkdir(parents=True, exist_ok=True)
+    lf = _log_file()
+    pf = _pid_file()
+
+    cmd = _build_serve_cmd(project_dir, host, port, config_path)
+
+    with open(lf, "a", encoding="utf-8") as log_fh:
+        if sys.platform == "win32":
+            DETACHED = 0x00000008
+            NEW_GROUP = 0x00000200
+            proc = _sp.Popen(
+                cmd, stdout=log_fh, stderr=log_fh,
+                creationflags=DETACHED | NEW_GROUP,
+            )
+        else:
+            proc = _sp.Popen(
+                cmd, stdout=log_fh, stderr=log_fh,
+                start_new_session=True,
+            )
+
+    pf.write_text(str(proc.pid), encoding="utf-8")
+    click.echo(f"[NexusTrader MCP] 服务器已启动（PID {proc.pid}）")
+    click.echo(f"   日志：{lf}")
+
+    if no_wait:
+        return
+
+    import socket as _sock
+    click.echo("[NexusTrader MCP] 等待服务器上线（最长 90 秒）…")
+    deadline = _time.monotonic() + 90
+    online = False
+    while _time.monotonic() < deadline:
+        # Abort early if process died
+        if not _is_process_alive(proc.pid):
+            click.echo("[NexusTrader MCP] ❌ 服务器进程已意外退出。查看日志：")
+            click.echo(f"   tail -20 {lf}")
+            sys.exit(1)
+        try:
+            with _sock.create_connection((host, port), timeout=2):
+                online = True
+                break
+        except OSError:
+            _time.sleep(2)
+
+    if online:
+        click.echo(f"[NexusTrader MCP] ✅ 已上线  http://{host}:{port}/sse")
+    else:
+        click.echo("[NexusTrader MCP] ⚠️  超时，服务器可能仍在初始化（交易引擎需要 30–90 秒）。")
+        click.echo(f"   持续查看日志：tail -f {lf}")
+        click.echo(f"   手动检查：uv run nexustrader-mcp status")
+
+
+@main.command(name="stop")
+def stop_server():
+    """停止后台服务器。"""
+    import signal as _signal
+    import subprocess as _sp
+    import time as _time
+
+    pid = _read_pid()
+    if not pid:
+        click.echo("[NexusTrader MCP] 未找到 PID 文件，服务器可能未在运行。")
+        return
+
+    if not _is_process_alive(pid):
+        click.echo(f"[NexusTrader MCP] 进程 {pid} 已不存在，清理 PID 文件。")
+        _pid_file().unlink(missing_ok=True)
+        return
+
+    try:
+        if sys.platform == "win32":
+            _sp.run(["taskkill", "/PID", str(pid), "/F"], check=True, capture_output=True)
+        else:
+            os.kill(pid, _signal.SIGTERM)
+            # Give process up to 10 s to exit gracefully before SIGKILL
+            deadline = _time.monotonic() + 10
+            while _time.monotonic() < deadline:
+                if not _is_process_alive(pid):
+                    break
+                _time.sleep(0.5)
+            else:
+                os.kill(pid, _signal.SIGKILL)
+    except Exception as e:
+        click.echo(f"[NexusTrader MCP] ❌ 停止失败：{e}", err=True)
+        sys.exit(1)
+
+    _pid_file().unlink(missing_ok=True)
+    click.echo(f"[NexusTrader MCP] ✅ 服务器已停止（PID {pid}）")
+
+
+@main.command(name="status")
+@click.option("--host", default=_DEFAULT_HOST, show_default=True)
+@click.option("--port", type=int, default=_DEFAULT_PORT, show_default=True)
+def server_status(host: str, port: int):
+    """查看后台服务器运行状态。"""
+    import socket as _sock
+
+    pid = _read_pid()
+    alive = pid and _is_process_alive(pid)
+
+    if not alive:
+        if pid:
+            _pid_file().unlink(missing_ok=True)
+        click.echo("[NexusTrader MCP] ❌ OFFLINE  （未检测到运行中的服务器）")
+        click.echo("   启动：uv run nexustrader-mcp start")
+        sys.exit(1)
+
+    try:
+        with _sock.create_connection((host, port), timeout=3):
+            click.echo(f"[NexusTrader MCP] ✅ ONLINE   PID={pid}  http://{host}:{port}/sse")
+    except OSError:
+        click.echo(f"[NexusTrader MCP] ⏳ STARTING  PID={pid}（端口 {port} 未就绪，引擎可能仍在初始化）")
+        click.echo(f"   查看日志：uv run nexustrader-mcp logs")
+        sys.exit(2)
+
+
+@main.command(name="logs")
+@click.argument("lines", default=50, type=int)
+def server_logs(lines: int):
+    """查看服务器日志（最后 N 行，默认 50）。"""
+    lf = _log_file()
+    if not lf.is_file():
+        click.echo(f"日志文件不存在：{lf}")
+        click.echo("请先运行：uv run nexustrader-mcp start")
+        sys.exit(1)
+    all_lines = lf.read_text(encoding="utf-8", errors="replace").splitlines()
+    tail = all_lines[-lines:]
+    click.echo(f"# {lf}  （最后 {min(lines, len(all_lines))} / {len(all_lines)} 行）")
+    for line in tail:
+        click.echo(line)
+
+
 @main.command(name="run")
 @click.option("--config", "config_path", default=None, help="配置文件路径")
 def run_server(config_path: Optional[str]):
@@ -639,8 +862,8 @@ def serve_sse(host: str, port: int, config_path: Optional[str]):
         except OSError:
             click.echo(
                 f"[NexusTrader MCP] ❌ 端口 {port} 已被占用，无法启动。\n"
-                f"  请先停止已有的 `serve` / systemd 服务实例\n"
-                f"  或查看占用端口的进程（Linux）：lsof -i :{port}\n"
+                f"  请先停止已有的服务器：uv run nexustrader-mcp stop\n"
+                f"  或查看占用端口的进程（Linux/macOS）：lsof -i :{port}\n"
                 f"  Windows：netstat -ano | findstr :{port}",
                 err=True,
             )

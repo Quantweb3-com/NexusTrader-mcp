@@ -1,13 +1,29 @@
 ---
 name: nexustrader
 description: NexusTrader 量化交易助手 — 查询加密货币账户余额、持仓、行情，并执行交易操作。支持 Binance、Bybit、OKX、Bitget、HyperLiquid。
-metadata: {"openclaw":{"requires":{"bins":["python3"]}}}
+metadata: {"openclaw":{"requires":{"bins":["python3","uv"],"external":{"project_dir":"~/<NexusTrader-mcp 项目路径>","config_file":"config.yaml","api_keys":"${project_dir}/.keys/.secrets.toml"}}}}
 ---
 
 # NexusTrader 量化交易助手
 
 > 通过本地命令行工具查询加密货币账户余额、持仓、行情，并执行交易操作。
 > 支持 Binance、Bybit、OKX、Bitget、HyperLiquid。
+
+## 前提条件（使用本 Skill 前请确认）
+
+| 条件 | 说明 |
+|------|------|
+| **NexusTrader-mcp 项目** | 已从 [github.com/Quantweb3-com/NexusTrader-mcp](https://github.com/Quantweb3-com/NexusTrader-mcp) 克隆并运行过 `uv run nexustrader-mcp setup` |
+| **config.yaml** | 存在于项目目录，记录交易所和账户类型 |
+| **API 密钥** | 填写在 `<项目目录>/.keys/.secrets.toml`（由您管理，不在 ~/.openclaw） |
+| **MCP 服务器** | 需要手动启动：`uv run nexustrader-mcp start` |
+
+**本 Skill 安装的内容**（`bash openclaw/install.sh` 执行后）：
+- `~/.openclaw/skills/nexustrader/` — 4 个文件（bridge.py、daemon.sh、SKILL.md、.env）
+- `~/.openclaw/workspace/BOOT.md` — 追加状态检查片段（离线时提醒您，不自动启动进程）
+- `~/.openclaw/skills/index.json` — 追加索引条目
+
+**不安装**：systemd 服务、cron 任务、shell 启动项，或任何系统级自动启动配置。
 
 ---
 
@@ -119,9 +135,10 @@ python3 "${SKILL_DIR}/bridge.py" <tool_name> [--arg=value ...]
 ### 错误处理
 
 - 命令返回 `error` 字段 → 用中文解释原因，给出解决建议
-- 服务不可用 → 提示用户：
+- 服务不可用 → 提示用户（先从 `.env` 读 `NEXUSTRADER_PROJECT_DIR` 确认项目路径，再给出命令）：
   ```
-  bash ~/.openclaw/skills/nexustrader/nexustrader_daemon.sh restart
+  uv run nexustrader-mcp start   # 启动（如未运行）
+  uv run nexustrader-mcp stop && uv run nexustrader-mcp start   # 重启
   ```
 - API Key 无效 → 提示填写 API 凭证文件，路径见 `${SKILL_DIR}/.env` 中的 `NEXUSTRADER_PROJECT_DIR`，凭证文件为该目录下的 `.keys/.secrets.toml`
 
@@ -131,11 +148,14 @@ python3 "${SKILL_DIR}/bridge.py" <tool_name> [--arg=value ...]
 
 ```bash
 # 查看服务状态
-bash ~/.openclaw/skills/nexustrader/nexustrader_daemon.sh status
+uv run nexustrader-mcp status
 
 # 查看启动日志
-bash ~/.openclaw/skills/nexustrader/nexustrader_daemon.sh logs
+uv run nexustrader-mcp logs
 
 # 重启服务
-bash ~/.openclaw/skills/nexustrader/nexustrader_daemon.sh restart
+uv run nexustrader-mcp stop && uv run nexustrader-mcp start
 ```
+
+> 以上命令需在 NexusTrader-mcp 项目目录下运行，或将 `uv run` 替换为 `uv --directory <项目路径> run`。
+> Linux/macOS 用户也可用：`bash ~/.openclaw/skills/nexustrader/nexustrader_daemon.sh status|logs|restart`
