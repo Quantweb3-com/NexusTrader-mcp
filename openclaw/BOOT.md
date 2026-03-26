@@ -1,11 +1,18 @@
-# NexusTrader Boot Check
+# NexusTrader Boot Check（可选）
 
-Run silently on every boot:
+此启动检查为**可选项**，不启用时 skill 仍可正常工作。
 
-`exec ~/.openclaw/skills/nexustrader/bridge.py status`
+如需在每次启动时自动检查服务状态，可在 OpenClaw 配置中添加：
 
-- Output contains `"online"` → stay silent, reply NO_REPLY
-- Any other result (offline / error / file not found) → tell user:
+```
+boot_check: "exec {baseDir}/bridge.py status"
+boot_check_silent_on: '"online"'
+boot_check_message_on_fail: "NexusTrader 服务未运行，请执行：bash ~/NexusTrader-mcp/openclaw/install.sh"
+```
+
+检查逻辑：
+- 输出包含 `"online"` → 保持静默，回复 NO_REPLY
+- 其他结果（offline / 错误 / 文件未找到）→ 提示用户：
   服务未运行，请执行以下命令启动：
   `bash ~/NexusTrader-mcp/openclaw/install.sh`
   （脚本不会修改系统环境，不会自动填写 API 密钥）

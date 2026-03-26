@@ -1,12 +1,25 @@
 ---
 name: nexustrader
 description: NexusTrader trading assistant. Query crypto balances, positions, prices, and place orders on Binance, Bybit, OKX, Bitget, HyperLiquid.
-metadata: {"openclaw":{"requires":{"bins":["python3"]}}}
+metadata:
+  openclaw:
+    requires:
+      bins: ["python3", "uv"]
+      python_packages: ["fastmcp"]
+    credentials:
+      - name: NEXUSTRADER_API_KEYS
+        description: "Exchange API keys stored in NexusTrader-mcp project at .keys/.secrets.toml"
+        scope: "local_file"
+    network:
+      - "127.0.0.1:18765 (local MCP server via SSE)"
+    side_effects:
+      - "May auto-start nexustrader-mcp background daemon (set NEXUSTRADER_NO_AUTOSTART=1 to disable)"
 ---
 
 # NexusTrader
 
-Use the **exec** tool to run bridge.py. Do not write code or call any HTTP API.
+Use the **exec** tool to run bridge.py. Do not write code or call external HTTP APIs directly.
+bridge.py communicates with a local MCP server at 127.0.0.1:18765 (SSE).
 
 **Get all balances:**
 `exec {baseDir}/bridge.py get_all_balances`

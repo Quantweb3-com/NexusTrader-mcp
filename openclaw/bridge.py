@@ -171,15 +171,25 @@ async def _ensure_server(server_url: str) -> None:
     """Ensure server is online, auto-starting daemon if needed.
 
     Raises RuntimeError if server cannot be brought online.
+    Set NEXUSTRADER_NO_AUTOSTART=1 to disable auto-start.
     """
     info = await _check_status_raw(server_url)
     if info["status"] == "online":
         return
 
     print(
-        "⚠️  NexusTrader MCP server offline — attempting auto-start...",
+        "⚠️  NexusTrader MCP server offline — attempting auto-start...\n"
+        "    This will run: uv run nexustrader-mcp start (background process)\n"
+        "    To disable auto-start, set NEXUSTRADER_NO_AUTOSTART=1",
         file=sys.stderr,
     )
+
+    if os.environ.get("NEXUSTRADER_NO_AUTOSTART"):
+        raise RuntimeError(
+            "Auto-start disabled (NEXUSTRADER_NO_AUTOSTART=1). "
+            "Run manually: cd ~/NexusTrader-mcp && uv run nexustrader-mcp start"
+        )
+
     started = _daemon_start()
     _proj = os.environ.get("NEXUSTRADER_PROJECT_DIR", "~/NexusTrader-mcp")
     if not started:

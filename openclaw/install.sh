@@ -181,6 +181,11 @@ check_uv() {
 
     _yellow "  uv 未找到，正在自动安装..."
 
+    echo "  需要从 https://astral.sh/uv/install.sh 下载安装脚本。"
+    echo "  你可以先手动查看：curl -fsSL https://astral.sh/uv/install.sh | less"
+    read -r -p "  继续自动安装 uv？[y/N] " _uv_reply
+    [[ "${_uv_reply}" =~ ^[Yy]$ ]] || { _red "  已取消。请手动安装 uv 后重试：https://docs.astral.sh/uv/getting-started/installation/"; exit 1; }
+
     if command -v curl &>/dev/null; then
         curl -LsSf https://astral.sh/uv/install.sh | sh
     elif command -v wget &>/dev/null; then
