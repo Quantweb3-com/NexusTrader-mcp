@@ -1,6 +1,21 @@
 ---
 name: nexustrader
 description: NexusTrader trading assistant. Query crypto balances, positions, prices, and place orders on Binance, Bybit, OKX, Bitget, HyperLiquid.
+credentials:
+  - name: NEXUSTRADER_API_KEYS
+    description: "Exchange API keys in .keys/.secrets.toml (local file, not transmitted)"
+    scope: "local_file"
+    required: true
+env:
+  - name: NEXUSTRADER_MCP_URL
+    description: "MCP server URL (default: http://127.0.0.1:18765/sse)"
+    required: false
+  - name: NEXUSTRADER_PROJECT_DIR
+    description: "Path to NexusTrader-mcp project (default: ~/NexusTrader-mcp)"
+    required: false
+  - name: NEXUSTRADER_NO_AUTOSTART
+    description: "Set to 1 to disable automatic daemon start"
+    required: false
 metadata:
   openclaw:
     requires:
@@ -14,6 +29,7 @@ metadata:
       - "127.0.0.1:18765 (local MCP server via SSE)"
     side_effects:
       - "May auto-start nexustrader-mcp background daemon (set NEXUSTRADER_NO_AUTOSTART=1 to disable)"
+      - "install.sh may download uv from https://astral.sh/uv/install.sh via curl|sh (prompts user for confirmation before downloading)"
 ---
 
 # NexusTrader

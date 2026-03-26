@@ -181,31 +181,41 @@ def _install_openclaw_skill(project_dir: str, skill_dir: Path, config_path: str)
         "path": str(skill_dir),
         "skill_file": str(skill_dir / "SKILL.md"),
         "installed_at": datetime.datetime.now().isoformat(),
+        "credentials": [
+            {
+                "name": "NEXUSTRADER_API_KEYS",
+                "description": "Exchange API keys in .keys/.secrets.toml (local file, not transmitted)",
+                "scope": "local_file",
+                "required": True,
+            }
+        ],
+        "env": [
+            {"name": "NEXUSTRADER_MCP_URL", "description": "MCP server URL (default: http://127.0.0.1:18765/sse)", "required": False},
+            {"name": "NEXUSTRADER_PROJECT_DIR", "description": "Path to NexusTrader-mcp project (default: ~/NexusTrader-mcp)", "required": False},
+            {"name": "NEXUSTRADER_NO_AUTOSTART", "description": "Set to 1 to disable automatic daemon start", "required": False},
+        ],
         "metadata": {
-            "requires": {
-                "bins": [python_cmd, "uv"],
-                "python_packages": ["fastmcp"],
-            },
-            "credentials": [
-                {
-                    "name": "NEXUSTRADER_API_KEYS",
-                    "description": "Exchange API keys stored in NexusTrader-mcp project at .keys/.secrets.toml",
-                    "scope": "local_file",
-                }
-            ],
-            "env": [
-                "NEXUSTRADER_MCP_URL",
-                "NEXUSTRADER_PROJECT_DIR",
-                "NEXUSTRADER_NO_AUTOSTART",
-            ],
-            "network": [
-                "127.0.0.1:18765 (local MCP server via SSE)",
-            ],
-            "side_effects": [
-                "May auto-start nexustrader-mcp background daemon (set NEXUSTRADER_NO_AUTOSTART=1 to disable)",
-                "Reads .env and .keys/.secrets.toml from NexusTrader-mcp project directory",
-                "Can execute real trades via create_order/cancel_order/modify_order (requires explicit user confirmation)",
-            ],
+            "openclaw": {
+                "requires": {
+                    "bins": [python_cmd, "uv"],
+                    "python_packages": ["fastmcp"],
+                },
+                "credentials": [
+                    {
+                        "name": "NEXUSTRADER_API_KEYS",
+                        "description": "Exchange API keys stored in NexusTrader-mcp project at .keys/.secrets.toml",
+                        "scope": "local_file",
+                    }
+                ],
+                "network": [
+                    "127.0.0.1:18765 (local MCP server via SSE)",
+                ],
+                "side_effects": [
+                    "May auto-start nexustrader-mcp background daemon (set NEXUSTRADER_NO_AUTOSTART=1 to disable)",
+                    "Reads .env and .keys/.secrets.toml from NexusTrader-mcp project directory",
+                    "Can execute real trades via create_order/cancel_order/modify_order (requires explicit user confirmation)",
+                ],
+            }
         },
     }
     existing_idx = next((i for i, s in enumerate(skills) if s.get("id") == "nexustrader"), None)

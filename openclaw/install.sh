@@ -76,7 +76,7 @@ print_plan() {
     echo "  [2] 检查 Python 3.x 可用性"
     echo "  [3] 检查 MCP 服务是否已在运行（已运行则退出）"
     echo "  [4] 检查代码目录 ~/NexusTrader-mcp 是否存在"
-    echo "  [5] 检查并安装 uv 包管理器（如未安装）"
+    echo "  [5] 检查 uv 包管理器（如未安装则提示手动安装后退出）"
     echo "  [6] 运行 nexustrader-mcp setup（初始化 config.yaml）"
     echo "  [7] 启动 nexustrader-mcp 服务器"
     echo "  [8] 验证服务已成功上线"
@@ -169,7 +169,7 @@ check_dirs() {
     _green "  ✓ 代码目录存在: ${PROJECT_DIR}"
 }
 
-# ── 步骤 5：检查 / 安装 uv ────────────────────────────────────────────────────
+# ── 步骤 5：检查 uv（不自动下载，要求用户手动安装）────────────────────────────
 check_uv() {
     _blue "[5/8] 检查 uv..."
     export PATH="${HOME}/.local/bin:${HOME}/.cargo/bin:${PATH}"
@@ -179,31 +179,21 @@ check_uv() {
         return 0
     fi
 
-    _yellow "  uv 未找到，正在自动安装..."
-
-    echo "  需要从 https://astral.sh/uv/install.sh 下载安装脚本。"
-    echo "  你可以先手动查看：curl -fsSL https://astral.sh/uv/install.sh | less"
-    read -r -p "  继续自动安装 uv？[y/N] " _uv_reply
-    [[ "${_uv_reply}" =~ ^[Yy]$ ]] || { _red "  已取消。请手动安装 uv 后重试：https://docs.astral.sh/uv/getting-started/installation/"; exit 1; }
-
-    if command -v curl &>/dev/null; then
-        curl -LsSf https://astral.sh/uv/install.sh | sh
-    elif command -v wget &>/dev/null; then
-        wget -qO- https://astral.sh/uv/install.sh | sh
-    else
-        _red "  ✗ 未找到 curl 或 wget，无法自动安装 uv"
-        _red "  请手动安装：https://docs.astral.sh/uv/getting-started/installation/"
-        exit 1
-    fi
-
-    export PATH="${HOME}/.local/bin:${HOME}/.cargo/bin:${PATH}"
-
-    if command -v uv &>/dev/null; then
-        _green "  ✓ uv 安装成功: $(uv --version)"
-    else
-        _red "  ✗ uv 安装后仍无法找到，请重新打开终端后再运行本脚本"
-        exit 1
-    fi
+    _red "  ✗ 未找到 uv"
+    echo ""
+    echo "  请先手动安装 uv，然后重新运行本脚本："
+    echo ""
+    _bold "    # macOS / Linux："
+    echo "    curl -LsSf https://astral.sh/uv/install.sh | sh"
+    echo ""
+    _bold "    # 或通过包管理器："
+    echo "    brew install uv          # macOS Homebrew"
+    echo "    pip install uv           # pip"
+    echo ""
+    echo "  详细安装说明：https://docs.astral.sh/uv/getting-started/installation/"
+    echo "  建议安装前先查看脚本内容：curl -fsSL https://astral.sh/uv/install.sh | less"
+    echo ""
+    exit 1
 }
 
 # ── 步骤 6：运行 setup ────────────────────────────────────────────────────────
