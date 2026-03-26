@@ -161,10 +161,12 @@ def _install_openclaw_skill(project_dir: str, skill_dir: Path, config_path: str)
         "NEXUSTRADER_MCP_HOST=127.0.0.1\n"
         "NEXUSTRADER_MCP_URL=http://127.0.0.1:18765/sse\n"
         f"NEXUSTRADER_LOG_DIR={skill_dir / 'logs'}\n"
+        "# 取消注释下一行可禁止 bridge.py 自动启动后台 daemon\n"
+        "# NEXUSTRADER_NO_AUTOSTART=1\n"
     )
     (skill_dir / ".env").write_text(env_content, encoding="utf-8")
 
-    # Register in ~/.openclaw/skills/index.json
+    # Register in ~/.openclaw/skills/index.json (include full metadata for registry auditors)
     index_path = skill_dir.parent / "index.json"
     index_data: dict = {}
     if index_path.is_file():
@@ -179,6 +181,32 @@ def _install_openclaw_skill(project_dir: str, skill_dir: Path, config_path: str)
         "path": str(skill_dir),
         "skill_file": str(skill_dir / "SKILL.md"),
         "installed_at": datetime.datetime.now().isoformat(),
+        "metadata": {
+            "requires": {
+                "bins": [python_cmd, "uv"],
+                "python_packages": ["fastmcp"],
+            },
+            "credentials": [
+                {
+                    "name": "NEXUSTRADER_API_KEYS",
+                    "description": "Exchange API keys stored in NexusTrader-mcp project at .keys/.secrets.toml",
+                    "scope": "local_file",
+                }
+            ],
+            "env": [
+                "NEXUSTRADER_MCP_URL",
+                "NEXUSTRADER_PROJECT_DIR",
+                "NEXUSTRADER_NO_AUTOSTART",
+            ],
+            "network": [
+                "127.0.0.1:18765 (local MCP server via SSE)",
+            ],
+            "side_effects": [
+                "May auto-start nexustrader-mcp background daemon (set NEXUSTRADER_NO_AUTOSTART=1 to disable)",
+                "Reads .env and .keys/.secrets.toml from NexusTrader-mcp project directory",
+                "Can execute real trades via create_order/cancel_order/modify_order (requires explicit user confirmation)",
+            ],
+        },
     }
     existing_idx = next((i for i, s in enumerate(skills) if s.get("id") == "nexustrader"), None)
     if existing_idx is not None:
@@ -193,7 +221,7 @@ def _install_openclaw_skill(project_dir: str, skill_dir: Path, config_path: str)
         workspace_dir = skill_dir.parent.parent / "workspace"
         workspace_dir.mkdir(parents=True, exist_ok=True)
         boot_dst = workspace_dir / "BOOT.md"
-        marker = "# NexusTrader MCP 状态检查"
+        marker = "# NexusTrader Boot Check"
         fragment = boot_src.read_text(encoding="utf-8")
         if boot_dst.is_file():
             existing = boot_dst.read_text(encoding="utf-8")

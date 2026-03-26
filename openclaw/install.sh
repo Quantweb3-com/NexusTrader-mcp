@@ -288,6 +288,59 @@ verify_service() {
     exit 1
 }
 
+# ── 更新本地 skill registry（index.json）────────────────────────────────────
+# 把 SKILL.md 中声明的 metadata 写入 ~/.openclaw/skills/index.json，
+# 确保 registry 与实际 SKILL.md 一致（避免审查工具报告元数据不一致）。
+update_skill_registry() {
+    local INDEX="${HOME}/.openclaw/skills/index.json"
+    local SKILL_DIR="${HOME}/.openclaw/skills/nexustrader"
+
+    # 只有在 OpenClaw skill 已安装时才执行（未安装则跳过）
+    if [[ ! -f "${INDEX}" ]]; then
+        return 0
+    fi
+
+    "${PYTHON_CMD}" - <<PYEOF
+import json, pathlib, datetime
+
+index_path = pathlib.Path("${INDEX}")
+data = json.loads(index_path.read_text())
+
+entry = next((s for s in data.get("skills", []) if s.get("id") == "nexustrader"), None)
+if entry is None:
+    print("  ℹ skills/index.json 中无 nexustrader 条目，跳过 registry 更新")
+else:
+    entry["metadata"] = {
+        "requires": {
+            "bins": ["python3", "uv"],
+            "python_packages": ["fastmcp"]
+        },
+        "credentials": [
+            {
+                "name": "NEXUSTRADER_API_KEYS",
+                "description": "Exchange API keys stored in NexusTrader-mcp project at .keys/.secrets.toml",
+                "scope": "local_file"
+            }
+        ],
+        "env": [
+            "NEXUSTRADER_MCP_URL",
+            "NEXUSTRADER_PROJECT_DIR",
+            "NEXUSTRADER_NO_AUTOSTART"
+        ],
+        "network": [
+            "127.0.0.1:18765 (local MCP server via SSE)"
+        ],
+        "side_effects": [
+            "May auto-start nexustrader-mcp background daemon (set NEXUSTRADER_NO_AUTOSTART=1 to disable)",
+            "Reads .env and .keys/.secrets.toml from NexusTrader-mcp project directory",
+            "Can execute real trades via create_order/cancel_order/modify_order (requires explicit user confirmation)"
+        ]
+    }
+    index_path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+    print("  ✓ skills/index.json metadata 已更新（credentials、requires、side_effects）")
+PYEOF
+}
+
 # ── 卸载 ──────────────────────────────────────────────────────────────────────
 cmd_uninstall() {
     SKILL_DIR="${HOME}/.openclaw/skills/nexustrader"
@@ -372,6 +425,7 @@ case "${COMMAND}" in
         run_setup
         start_server
         verify_service
+        update_skill_registry
         ;;
     *)
         echo "用法: bash install.sh [--uninstall] [--help]"
