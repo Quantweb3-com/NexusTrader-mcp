@@ -168,27 +168,34 @@ async def _check_status_raw(server_url: str) -> dict:
 
 
 async def _ensure_server(server_url: str) -> None:
-    """Ensure server is online, auto-starting daemon if needed.
+    """Ensure server is online, optionally auto-starting the daemon.
 
-    Raises RuntimeError if server cannot be brought online.
-    Set NEXUSTRADER_NO_AUTOSTART=1 to disable auto-start.
+    Auto-start is DISABLED by default. To enable, set NEXUSTRADER_NO_AUTOSTART=0
+    in the skill's .env file (~/.openclaw/skills/nexustrader/.env).
     """
     info = await _check_status_raw(server_url)
     if info["status"] == "online":
         return
 
+    _proj = os.environ.get("NEXUSTRADER_PROJECT_DIR", "~/NexusTrader-mcp")
+
+    # Auto-start is opt-in: only when explicitly set to "0"
+    if os.environ.get("NEXUSTRADER_NO_AUTOSTART", "1") != "0":
+        raise RuntimeError(
+            "NexusTrader MCP 服务器未运行。请手动启动：\n"
+            f"  cd {_proj} && uv run nexustrader-mcp start\n\n"
+            "如需允许自动启动，在 ~/.openclaw/skills/nexustrader/.env 中设置：\n"
+            "  NEXUSTRADER_NO_AUTOSTART=0"
+        )
+
     print(
-        "⚠️  NexusTrader MCP server offline — attempting auto-start...\n"
-        "    This will run: uv run nexustrader-mcp start (background process)\n"
-        "    To disable auto-start, set NEXUSTRADER_NO_AUTOSTART=1",
+        "⚠️  NexusTrader MCP server offline — auto-start enabled, starting daemon...\n"
+        "    Command: uv run nexustrader-mcp start (background process)\n"
+        "    API keys in use: "
+        f"{_proj}/.keys/.secrets.toml\n"
+        "    To disable auto-start: set NEXUSTRADER_NO_AUTOSTART=1 in skill .env",
         file=sys.stderr,
     )
-
-    if os.environ.get("NEXUSTRADER_NO_AUTOSTART"):
-        raise RuntimeError(
-            "Auto-start disabled (NEXUSTRADER_NO_AUTOSTART=1). "
-            "Run manually: cd ~/NexusTrader-mcp && uv run nexustrader-mcp start"
-        )
 
     started = _daemon_start()
     _proj = os.environ.get("NEXUSTRADER_PROJECT_DIR", "~/NexusTrader-mcp")

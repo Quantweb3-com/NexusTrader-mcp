@@ -154,15 +154,18 @@ def _install_openclaw_skill(project_dir: str, skill_dir: Path, config_path: str)
     # Auto-generate .env with all paths pre-filled — user never needs to edit this
     env_content = (
         "# NexusTrader MCP — OpenClaw Skill 配置\n"
-        "# 由 nexustrader-mcp setup 自动生成，无需手动编辑\n\n"
+        "# 由 nexustrader-mcp setup 自动生成\n\n"
         f"NEXUSTRADER_PROJECT_DIR={project_dir}\n"
         f"NEXUSTRADER_MCP_CONFIG={config_path}\n"
         "NEXUSTRADER_MCP_PORT=18765\n"
         "NEXUSTRADER_MCP_HOST=127.0.0.1\n"
         "NEXUSTRADER_MCP_URL=http://127.0.0.1:18765/sse\n"
         f"NEXUSTRADER_LOG_DIR={skill_dir / 'logs'}\n"
-        "# 取消注释下一行可禁止 bridge.py 自动启动后台 daemon\n"
-        "# NEXUSTRADER_NO_AUTOSTART=1\n"
+        "\n"
+        "# 自动启动控制（默认禁用）\n"
+        "# 设为 0 可允许 bridge.py 在服务离线时自动启动后台 daemon\n"
+        "# 启用前请确认已阅读安全说明并已配置好 API 密钥\n"
+        "NEXUSTRADER_NO_AUTOSTART=1\n"
     )
     (skill_dir / ".env").write_text(env_content, encoding="utf-8")
 
