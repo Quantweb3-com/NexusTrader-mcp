@@ -98,8 +98,8 @@ def register(mcp, engine: EngineManager):
         event = asyncio.Event()
         strategy = engine.strategy
 
-        strategy.cancel_order(symbol=symbol, oid=oid)
         strategy.register_order_event(oid, event)
+        strategy.cancel_order(symbol=symbol, oid=oid)
 
         try:
             await asyncio.wait_for(event.wait(), timeout=_ORDER_WAIT_TIMEOUT)
@@ -113,17 +113,59 @@ def register(mcp, engine: EngineManager):
         return {"oid": oid, "status": "CANCELING"}
 
     @mcp.tool()
-    def cancel_all_orders(symbol: str) -> dict:
+    async def cancel_all_orders(symbol: str) -> dict:
         """撤销指定交易对的所有挂单。
 
         Args:
             symbol: 交易对，如 BTCUSDT-PERP.BINANCE
         """
+        strategy = engine.strategy
+        cache = strategy.cache
+
         try:
-            engine.strategy.cancel_all_orders(symbol=symbol)
-            return {"symbol": symbol, "status": "CANCEL_ALL_SUBMITTED"}
+            oids = list(cache.get_open_orders(symbol=symbol))
         except Exception as e:
             return {"error": str(e)}
+
+        if not oids:
+            return {"symbol": symbol, "status": "NO_OPEN_ORDERS", "cancelled": 0}
+
+        events: dict[str, asyncio.Event] = {}
+        for oid in oids:
+            event = asyncio.Event()
+            strategy.register_order_event(oid, event)
+            events[oid] = event
+            try:
+                strategy.cancel_order(symbol=symbol, oid=oid)
+            except Exception as e:
+                strategy.pop_order_result(oid)
+                events.pop(oid, None)
+
+        if not events:
+            return {"error": "所有撤单提交均失败"}
+
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*[e.wait() for e in events.values()]),
+                timeout=_ORDER_WAIT_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            for oid in list(events):
+                strategy.pop_order_result(oid)
+            return {
+                "symbol": symbol,
+                "status": "CANCEL_ALL_SUBMITTED",
+                "message": "撤单已提交，但等待确认超时",
+                "order_count": len(events),
+            }
+
+        results = []
+        for oid in list(events):
+            order = strategy.pop_order_result(oid)
+            if order:
+                results.append(serialize_order(order))
+
+        return {"symbol": symbol, "status": "CANCELLED", "cancelled": len(results), "orders": results}
 
     @mcp.tool()
     async def modify_order(
@@ -156,6 +198,7 @@ def register(mcp, engine: EngineManager):
 
         event = asyncio.Event()
 
+        strategy.register_order_event(oid, event)
         strategy.modify_order(
             symbol=symbol,
             oid=oid,
@@ -163,7 +206,6 @@ def register(mcp, engine: EngineManager):
             price=Decimal(price),
             amount=Decimal(amount),
         )
-        strategy.register_order_event(oid, event)
 
         try:
             await asyncio.wait_for(event.wait(), timeout=_ORDER_WAIT_TIMEOUT)
