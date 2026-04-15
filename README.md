@@ -5,6 +5,7 @@
 `NexusTrader MCP` 是一个面向交易团队、量化开发者与 AI 产品团队的 Model Context Protocol server。它把 `NexusTrader` 的账户、仓位、行情和交易能力安全地暴露给 Claude Code、Cursor、Codex 与 OpenClaw，让你可以直接用自然语言完成查询、分析与执行。
 
 [查看 NexusTrader 主项目](https://github.com/Quantweb3-com/NexusTrader)  
+[查看在线文档](https://nexustrader-mcp.readthedocs.io/)  
 [查看 OpenClaw 集成说明](./docs/openclaw.md)  
 [查看完整发布说明](./CHANGELOG.md)
 
@@ -153,6 +154,7 @@ uv run nexustrader-mcp serve
 
 ## 文档
 
+- [在线文档站](https://nexustrader-mcp.readthedocs.io/)
 - [快速上手](./docs/getting-started.md)
 - [OpenClaw 使用指南](./docs/openclaw.md)
 - [故障排查](./docs/troubleshooting.md)
