@@ -1,7 +1,7 @@
 project = "NexusTrader MCP"
 author = "QuantWeb3"
 copyright = "2026, QuantWeb3"
-release = "0.1.1"
+release = "0.1.2"
 
 extensions = [
     "myst_parser",
