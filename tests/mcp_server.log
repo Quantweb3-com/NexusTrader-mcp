@@ -1,0 +1,182 @@
+
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                                                                              │
+│                                                                              │
+│                         ▄▀▀ ▄▀█ █▀▀ ▀█▀ █▀▄▀█ █▀▀ █▀█                        │
+│                         █▀  █▀█ ▄▄█  █  █ ▀ █ █▄▄ █▀▀                        │
+│                                                                              │
+│                                                                              │
+│                                FastMCP 3.1.1                                 │
+│                            https://gofastmcp.com                             │
+│                                                                              │
+│                    🖥  Server:      NexusTrader, 3.1.1                        │
+│                    🚀 Deploy free: https://fastmcp.cloud                     │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+
+[NexusTrader 18:45:06] importing modules...
+[03/20/26 18:45:06] INFO     Starting MCP server 'NexusTrader'  transport.py:183
+                             with transport 'stdio'                             
+[03/20/26 18:47:06] Error calling tool 'get_exchange_info'                      
+                    ┌─────────── Traceback (most recent call last) ────────────┐
+                    │ H:\code\github\Quantweb3-com\NexusTrader-mcp\.venv\Lib\s │
+                    │ ite-packages\fastmcp\server\server.py:987 in call_tool   │
+                    │                                                          │
+                    │ H:\code\github\Quantweb3-com\NexusTrader-mcp\.venv\Lib\s │
+                    │ ite-packages\fastmcp\tools\tool.py:354 in _run           │
+                    │                                                          │
+                    │                 ... 6 frames hidden ...                  │
+                    │                                                          │
+                    │ H:\code\github\Quantweb3-com\NexusTrader-mcp\nexustrader │
+                    │ _mcp\tools\info.py:20 in get_exchange_info               │
+                    │                                                          │
+                    │   17 │   def get_exchange_info() -> list:                │
+                    │   18 │   │   """获取已配置的交易所及其连接状态。"""      │
+                    │   19 │   │   results = []                                │
+                    │ > 20 │   │   for ex_type, ex_mgr in engine.strategy._exc │
+                    │   21 │   │   │   account_types = []                      │
+                    │   22 │   │   │   for at in engine.strategy._public_conne │
+                    │   23 │   │   │   │   if hasattr(at, "exchange_id") and a │
+                    │                                                          │
+                    │ H:\code\github\Quantweb3-com\NexusTrader-mcp\nexustrader │
+                    │ _mcp\engine_manager.py:48 in strategy                    │
+                    │                                                          │
+                    │    45 │   │   """Return strategy, blocking until engine  │
+                    │    46 │   │   if self._thread is not None:               │
+                    │    47 │   │   │   if not self._ready.wait(timeout=_READY │
+                    │ >  48 │   │   │   │   raise RuntimeError(                │
+                    │    49 │   │   │   │   │   f"NexusTrader engine startup t │
+                    │       network and config"                                │
+                    │    50 │   │   │   │   )                                  │
+                    │    51 │   │   │   if self._error:                        │
+                    └──────────────────────────────────────────────────────────┘
+                    RuntimeError: NexusTrader engine startup timeout (120s),    
+                    check network and config                                    
+[03/20/26 18:49:11] Error calling tool 'get_exchange_info'                      
+                    ┌─────────── Traceback (most recent call last) ────────────┐
+                    │ H:\code\github\Quantweb3-com\NexusTrader-mcp\.venv\Lib\s │
+                    │ ite-packages\fastmcp\server\server.py:987 in call_tool   │
+                    │                                                          │
+                    │ H:\code\github\Quantweb3-com\NexusTrader-mcp\.venv\Lib\s │
+                    │ ite-packages\fastmcp\tools\tool.py:354 in _run           │
+                    │                                                          │
+                    │                 ... 6 frames hidden ...                  │
+                    │                                                          │
+                    │ H:\code\github\Quantweb3-com\NexusTrader-mcp\nexustrader │
+                    │ _mcp\tools\info.py:20 in get_exchange_info               │
+                    │                                                          │
+                    │   17 │   def get_exchange_info() -> list:                │
+                    │   18 │   │   """获取已配置的交易所及其连接状态。"""      │
+                    │   19 │   │   results = []                                │
+                    │ > 20 │   │   for ex_type, ex_mgr in engine.strategy._exc │
+                    │   21 │   │   │   account_types = []                      │
+                    │   22 │   │   │   for at in engine.strategy._public_conne │
+                    │   23 │   │   │   │   if hasattr(at, "exchange_id") and a │
+                    │                                                          │
+                    │ H:\code\github\Quantweb3-com\NexusTrader-mcp\nexustrader │
+                    │ _mcp\engine_manager.py:48 in strategy                    │
+                    │                                                          │
+                    │    45 │   │   """Return strategy, blocking until engine  │
+                    │    46 │   │   if self._thread is not None:               │
+                    │    47 │   │   │   if not self._ready.wait(timeout=_READY │
+                    │ >  48 │   │   │   │   raise RuntimeError(                │
+                    │    49 │   │   │   │   │   f"NexusTrader engine startup t │
+                    │       network and config"                                │
+                    │    50 │   │   │   │   )                                  │
+                    │    51 │   │   │   if self._error:                        │
+                    └──────────────────────────────────────────────────────────┘
+                    RuntimeError: NexusTrader engine startup timeout (120s),    
+                    check network and config                                    
+
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                                                                              │
+│                                                                              │
+│                         ▄▀▀ ▄▀█ █▀▀ ▀█▀ █▀▄▀█ █▀▀ █▀█                        │
+│                         █▀  █▀█ ▄▄█  █  █ ▀ █ █▄▄ █▀▀                        │
+│                                                                              │
+│                                                                              │
+│                                FastMCP 3.1.1                                 │
+│                            https://gofastmcp.com                             │
+│                                                                              │
+│                    🖥  Server:      NexusTrader, 3.1.1                        │
+│                    🚀 Deploy free: https://fastmcp.cloud                     │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+
+[NexusTrader 18:51:36] importing modules...
+[03/20/26 18:51:36] INFO     Starting MCP server 'NexusTrader'  transport.py:183
+                             with transport 'stdio'                             
+[03/20/26 18:53:36] Error calling tool 'get_exchange_info'                      
+                    ┌─────────── Traceback (most recent call last) ────────────┐
+                    │ H:\code\github\Quantweb3-com\NexusTrader-mcp\.venv\Lib\s │
+                    │ ite-packages\fastmcp\server\server.py:987 in call_tool   │
+                    │                                                          │
+                    │ H:\code\github\Quantweb3-com\NexusTrader-mcp\.venv\Lib\s │
+                    │ ite-packages\fastmcp\tools\tool.py:354 in _run           │
+                    │                                                          │
+                    │                 ... 6 frames hidden ...                  │
+                    │                                                          │
+                    │ H:\code\github\Quantweb3-com\NexusTrader-mcp\nexustrader │
+                    │ _mcp\tools\info.py:20 in get_exchange_info               │
+                    │                                                          │
+                    │   17 │   def get_exchange_info() -> list:                │
+                    │   18 │   │   """获取已配置的交易所及其连接状态。"""      │
+                    │   19 │   │   results = []                                │
+                    │ > 20 │   │   for ex_type, ex_mgr in engine.strategy._exc │
+                    │   21 │   │   │   account_types = []                      │
+                    │   22 │   │   │   for at in engine.strategy._public_conne │
+                    │   23 │   │   │   │   if hasattr(at, "exchange_id") and a │
+                    │                                                          │
+                    │ H:\code\github\Quantweb3-com\NexusTrader-mcp\nexustrader │
+                    │ _mcp\engine_manager.py:48 in strategy                    │
+                    │                                                          │
+                    │    45 │   │   """Return strategy, blocking until engine  │
+                    │    46 │   │   if self._thread is not None:               │
+                    │    47 │   │   │   if not self._ready.wait(timeout=_READY │
+                    │ >  48 │   │   │   │   raise RuntimeError(                │
+                    │    49 │   │   │   │   │   f"NexusTrader engine startup t │
+                    │       network and config"                                │
+                    │    50 │   │   │   │   )                                  │
+                    │    51 │   │   │   if self._error:                        │
+                    └──────────────────────────────────────────────────────────┘
+                    RuntimeError: NexusTrader engine startup timeout (120s),    
+                    check network and config                                    
+[03/20/26 18:55:41] Error calling tool 'get_exchange_info'                      
+                    ┌─────────── Traceback (most recent call last) ────────────┐
+                    │ H:\code\github\Quantweb3-com\NexusTrader-mcp\.venv\Lib\s │
+                    │ ite-packages\fastmcp\server\server.py:987 in call_tool   │
+                    │                                                          │
+                    │ H:\code\github\Quantweb3-com\NexusTrader-mcp\.venv\Lib\s │
+                    │ ite-packages\fastmcp\tools\tool.py:354 in _run           │
+                    │                                                          │
+                    │                 ... 6 frames hidden ...                  │
+                    │                                                          │
+                    │ H:\code\github\Quantweb3-com\NexusTrader-mcp\nexustrader │
+                    │ _mcp\tools\info.py:20 in get_exchange_info               │
+                    │                                                          │
+                    │   17 │   def get_exchange_info() -> list:                │
+                    │   18 │   │   """获取已配置的交易所及其连接状态。"""      │
+                    │   19 │   │   results = []                                │
+                    │ > 20 │   │   for ex_type, ex_mgr in engine.strategy._exc │
+                    │   21 │   │   │   account_types = []                      │
+                    │   22 │   │   │   for at in engine.strategy._public_conne │
+                    │   23 │   │   │   │   if hasattr(at, "exchange_id") and a │
+                    │                                                          │
+                    │ H:\code\github\Quantweb3-com\NexusTrader-mcp\nexustrader │
+                    │ _mcp\engine_manager.py:48 in strategy                    │
+                    │                                                          │
+                    │    45 │   │   """Return strategy, blocking until engine  │
+                    │    46 │   │   if self._thread is not None:               │
+                    │    47 │   │   │   if not self._ready.wait(timeout=_READY │
+                    │ >  48 │   │   │   │   raise RuntimeError(                │
+                    │    49 │   │   │   │   │   f"NexusTrader engine startup t │
+                    │       network and config"                                │
+                    │    50 │   │   │   │   )                                  │
+                    │    51 │   │   │   if self._error:                        │
+                    └──────────────────────────────────────────────────────────┘
+                    RuntimeError: NexusTrader engine startup timeout (120s),    
+                    check network and config                                    
