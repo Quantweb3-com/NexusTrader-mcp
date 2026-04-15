@@ -45,19 +45,21 @@
 - 机构内控：让 AI 先完成查询和建议，再由人工确认交易。
 - 研究协作：把行情、持仓和订单状态统一带入 Copilot 流程。
 
-如果你正在评估 AI trading stack，建议同时查看上游执行引擎 [NexusTrader](https://github.com/Quantweb3-com/NexusTrader)。`NexusTrader MCP` 负责把能力接入 AI，`NexusTrader` 负责更底层的统一交易与账户抽象，两者适合一起对外展示、一起落地。
+如果你正在评估 AI trading stack，可以同时了解生态关联项目 [NexusTrader](https://github.com/Quantweb3-com/NexusTrader)。但就 `NexusTrader MCP` 本身而言，使用和部署并不要求本地同时存在 `NexusTrader` 仓库。
 
 ## 快速开始
 
-### 1. 准备目录
+### 1. 准备项目目录
 
-建议将两个仓库放在同级目录：
+只需要当前仓库即可，API 凭证放在本项目目录下的 `.keys/.secrets.toml`：
 
 ```text
-your-workspace/
-├─ NexusTrader/
-│  └─ .keys/.secrets.toml
-└─ NexusTrader-mcp/
+NexusTrader-mcp/
+├─ .keys/
+│  └─ .secrets.toml
+├─ docs/
+├─ nexustrader_mcp/
+└─ README.md
 ```
 
 ### 2. 安装依赖
@@ -79,11 +81,11 @@ uv run nexustrader-mcp setup
 - 生成 `config.yaml`
 - 按需写入 Claude Code、Codex、Cursor 配置
 - 在 Linux 环境下安装 OpenClaw skill
-- 在缺少密钥文件时，从模板生成 `.keys/.secrets.toml`
+- 在缺少密钥文件时，从模板生成当前项目下的 `.keys/.secrets.toml`
 
 ### 4. 填写 API 凭证
 
-编辑 `.keys/.secrets.toml`：
+编辑当前项目目录下的 `.keys/.secrets.toml`：
 
 ```toml
 [BINANCE.DEMO]
@@ -144,7 +146,7 @@ uv run nexustrader-mcp serve
 
 ## 安全说明
 
-- API 凭证从本地 `.keys/.secrets.toml` 读取，不会写入仓库。
+- API 凭证从当前项目目录下的 `.keys/.secrets.toml` 读取，不会写入仓库。
 - MCP 服务默认只监听 `127.0.0.1`。
 - 下单、撤单、改单会触发真实交易行为。
 - 商业环境建议默认启用测试网，验证完成后再切换实盘。

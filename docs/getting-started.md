@@ -4,24 +4,26 @@
 
 `NexusTrader MCP` 把交易查询和交易执行能力暴露给 AI 客户端。你可以把它理解为：
 
-- `NexusTrader`：统一交易引擎与账户抽象层
-- `NexusTrader MCP`：AI 接入层与自然语言操作层
+- `NexusTrader MCP`：当前仓库，负责 AI 接入层与自然语言操作层
+- `NexusTrader`：生态关联项目，可作为补充了解
 
-如果你想做可演示、可集成、可扩展的 AI trading workflow，这两个项目建议一起部署。
+如果你想做可演示、可集成、可扩展的 AI trading workflow，可以额外了解 `NexusTrader`。但运行 `NexusTrader MCP` 并不要求本地同时存在那个仓库。
 
 ## 环境要求
 
 - Python `>=3.11`
 - `uv`
-- `NexusTrader` 与 `NexusTrader-mcp` 位于同级目录
+- 当前项目目录下存在 `.keys/.secrets.toml`
 
 目录建议：
 
 ```text
-your-workspace/
-├─ NexusTrader/
-│  └─ .keys/.secrets.toml
-└─ NexusTrader-mcp/
+NexusTrader-mcp/
+├─ .keys/
+│  └─ .secrets.toml
+├─ docs/
+├─ nexustrader_mcp/
+└─ README.md
 ```
 
 ## 初始化
@@ -36,11 +38,11 @@ uv run nexustrader-mcp setup
 - 生成 `config.yaml`
 - 写入 Claude Code、Codex、Cursor 配置
 - 在 Linux 上安装 OpenClaw skill
-- 自动创建 `.keys/.secrets.toml` 模板文件
+- 自动创建当前项目下的 `.keys/.secrets.toml` 模板文件
 
 ## 配置凭证
 
-编辑 `.keys/.secrets.toml`：
+编辑当前项目目录下的 `.keys/.secrets.toml`：
 
 ```toml
 [BINANCE.DEMO]
@@ -79,4 +81,4 @@ uv run nexustrader-mcp stop
 
 - 对外演示时，把 `README` 当成首页，把 `docs/` 当成交付文档。
 - 对内部署时，把 AI 访问权限和实盘 API key 严格隔离。
-- 对客户销售时，建议同时介绍 [NexusTrader](https://github.com/Quantweb3-com/NexusTrader) 作为底层执行引擎，形成完整产品叙事。
+- 对客户销售时，可以补充介绍 [NexusTrader](https://github.com/Quantweb3-com/NexusTrader) 作为生态关联项目，但不要把它写成当前仓库的强依赖。

@@ -2,7 +2,7 @@
 
 欢迎使用 `NexusTrader MCP` 文档站。
 
-这是一个把 `NexusTrader` 交易能力接入 AI 客户端的 MCP server，适用于交易团队、量化开发者、AI 产品团队和技术销售场景。
+这是一个把交易查询与交易执行能力接入 AI 客户端的 MCP server，适用于交易团队、量化开发者、AI 产品团队和技术销售场景。
 
 ```{toctree}
 :maxdepth: 2
@@ -27,3 +27,5 @@ release-notes
 
 - [NexusTrader 主项目](https://github.com/Quantweb3-com/NexusTrader)
 - [NexusTrader MCP 仓库](https://github.com/Quantweb3-com/NexusTrader-mcp)
+
+`NexusTrader` 是可补充了解的生态项目，不是当前文档站的必备本地依赖。
